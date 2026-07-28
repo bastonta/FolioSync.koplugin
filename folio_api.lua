@@ -12,13 +12,13 @@ local function get_http_client()
     return nil
 end
 
-local function make_headers(token)
+local function make_headers(api_key)
     local headers = {
         ["Content-Type"] = "application/json",
         ["Accept"] = "application/json",
     }
-    if token and token ~= "" then
-        headers["Authorization"] = "Bearer " .. token
+    if api_key and api_key ~= "" then
+        headers["X-API-Key"] = api_key
     end
     return headers
 end
@@ -37,40 +37,43 @@ function FolioAPI:get_server_url()
     return utils.trim_slash(url)
 end
 
-function FolioAPI:get_token()
-    return self.settings.token or ""
+function FolioAPI:get_api_key()
+    return self.settings.api_key or ""
 end
 
-function FolioAPI:login(email, password, callback)
+function FolioAPI:has_auth()
+    return self.settings.api_key and self.settings.api_key ~= ""
+end
+
+function FolioAPI:get_headers()
+    return make_headers(self:get_api_key())
+end
+
+
+function FolioAPI:browse(series_id, sort_by, offset, limit, callback)
     local base_url = self:get_server_url()
-    if base_url == "" then
-        if callback then callback(false, "Server URL is not set") end
-        return false, "Server URL is not set"
+    offset = offset or 0
+    limit = limit or 20
+
+    local query = string.format("offset=%d&limit=%d", offset, limit)
+    if series_id and series_id ~= "" then
+        query = query .. "&seriesId=" .. tostring(series_id)
+    end
+    if sort_by and sort_by ~= "" then
+        query = query .. "&sortBy=" .. tostring(sort_by)
     end
 
-    local login_url = base_url .. "/identity/login"
-    local payload = json.encode({
-        email = email,
-        password = password,
-    })
-
+    local url = base_url .. "/browse?" .. query
     local http = get_http_client()
     if not http then
         if callback then callback(false, "HTTP client unavailable") end
         return false, "HTTP client unavailable"
     end
 
-    logger.info("FolioSync API: logging in to " .. login_url)
-    local response, err = http.post(login_url, payload, {
-        ["Content-Type"] = "application/json",
-        ["Accept"] = "application/json",
-    })
-
+    local response, err = http.get(url, self:get_headers())
     if not response then
-        local msg = "Connection error: " .. tostring(err or "Unknown")
-        logger.warn("FolioSync API: login failed - " .. msg)
-        if callback then callback(false, msg) end
-        return false, msg
+        if callback then callback(false, tostring(err)) end
+        return false, tostring(err)
     end
 
     local code = response.code or response.status or 0
@@ -78,29 +81,19 @@ function FolioAPI:login(email, password, callback)
 
     if code >= 200 and code < 300 then
         local ok, data = pcall(json.decode, body)
-        if ok and data and data.token then
-            self.settings.token = data.token
-            self.settings.user_id = data.userId
-            self.settings.email = email
-            logger.info("FolioSync API: login successful for " .. email)
+        if ok and data then
             if callback then callback(true, data) end
             return true, data
-        else
-            local msg = "Invalid login response format"
-            if callback then callback(false, msg) end
-            return false, msg
         end
-    else
-        local msg = "Login failed (HTTP " .. tostring(code) .. ")"
-        logger.warn("FolioSync API: " .. msg)
-        if callback then callback(false, msg) end
-        return false, msg
     end
+
+    local msg = "Failed to browse library (HTTP " .. tostring(code) .. ")"
+    if callback then callback(false, msg) end
+    return false, msg
 end
 
 function FolioAPI:list_books(page, limit, search, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     page = page or 1
     limit = limit or 20
 
@@ -116,7 +109,7 @@ function FolioAPI:list_books(page, limit, search, callback)
         return false, "HTTP client unavailable"
     end
 
-    local response, err = http.get(url, make_headers(token))
+    local response, err = http.get(url, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false, tostring(err)
@@ -140,7 +133,6 @@ end
 
 function FolioAPI:download_book(book_id, save_path, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/download"
 
     local http = get_http_client()
@@ -150,7 +142,7 @@ function FolioAPI:download_book(book_id, save_path, callback)
     end
 
     logger.info("FolioSync API: downloading book " .. tostring(book_id) .. " to " .. tostring(save_path))
-    local response, err = http.get(url, make_headers(token))
+    local response, err = http.get(url, self:get_headers())
     if not response then
         local msg = "Download failed: " .. tostring(err)
         if callback then callback(false, msg) end
@@ -181,7 +173,6 @@ end
 
 function FolioAPI:get_progress(book_id, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/progress"
 
     local http = get_http_client()
@@ -190,7 +181,7 @@ function FolioAPI:get_progress(book_id, callback)
         return false
     end
 
-    local response, err = http.get(url, make_headers(token))
+    local response, err = http.get(url, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false
@@ -213,7 +204,6 @@ end
 
 function FolioAPI:update_progress(book_id, cfi, progress_percent, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/progress"
 
     local payload = json.encode({
@@ -227,7 +217,7 @@ function FolioAPI:update_progress(book_id, cfi, progress_percent, callback)
         return false
     end
 
-    local response, err = http.put(url, payload, make_headers(token))
+    local response, err = http.put(url, payload, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false
@@ -245,7 +235,6 @@ end
 
 function FolioAPI:list_annotations(book_id, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations"
 
     local http = get_http_client()
@@ -254,7 +243,7 @@ function FolioAPI:list_annotations(book_id, callback)
         return false
     end
 
-    local response, err = http.get(url, make_headers(token))
+    local response, err = http.get(url, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false
@@ -277,7 +266,6 @@ end
 
 function FolioAPI:create_annotation(book_id, annotation, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations"
 
     local payload = json.encode({
@@ -293,7 +281,7 @@ function FolioAPI:create_annotation(book_id, annotation, callback)
         return false
     end
 
-    local response, err = http.post(url, payload, make_headers(token))
+    local response, err = http.post(url, payload, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false
@@ -316,7 +304,6 @@ end
 
 function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id)
 
     local payload = json.encode({
@@ -332,7 +319,7 @@ function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback
         return false
     end
 
-    local response, err = http.put(url, payload, make_headers(token))
+    local response, err = http.put(url, payload, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false
@@ -350,7 +337,6 @@ end
 
 function FolioAPI:delete_annotation(book_id, annotation_id, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id)
 
     local http = get_http_client()
@@ -359,7 +345,7 @@ function FolioAPI:delete_annotation(book_id, annotation_id, callback)
         return false
     end
 
-    local response, err = http.delete(url, make_headers(token))
+    local response, err = http.delete(url, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false
@@ -377,7 +363,6 @@ end
 
 function FolioAPI:list_bookmarks(book_id, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks"
 
     local http = get_http_client()
@@ -386,7 +371,7 @@ function FolioAPI:list_bookmarks(book_id, callback)
         return false
     end
 
-    local response, err = http.get(url, make_headers(token))
+    local response, err = http.get(url, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false
@@ -409,7 +394,6 @@ end
 
 function FolioAPI:create_bookmark(book_id, bookmark, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks"
 
     local payload = json.encode({
@@ -423,7 +407,7 @@ function FolioAPI:create_bookmark(book_id, bookmark, callback)
         return false
     end
 
-    local response, err = http.post(url, payload, make_headers(token))
+    local response, err = http.post(url, payload, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false
@@ -446,7 +430,6 @@ end
 
 function FolioAPI:delete_bookmark(book_id, bookmark_id, callback)
     local base_url = self:get_server_url()
-    local token = self:get_token()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks/" .. tostring(bookmark_id)
 
     local http = get_http_client()
@@ -455,7 +438,7 @@ function FolioAPI:delete_bookmark(book_id, bookmark_id, callback)
         return false
     end
 
-    local response, err = http.delete(url, make_headers(token))
+    local response, err = http.delete(url, self:get_headers())
     if not response then
         if callback then callback(false, tostring(err)) end
         return false

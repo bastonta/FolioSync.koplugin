@@ -14,9 +14,11 @@ function FolioBrowser:new(plugin_instance)
     local o = {
         plugin = plugin_instance,
         api = plugin_instance.api,
+        current_series_id = nil,
+        series_stack = {},
         current_page = 1,
         limit = 15,
-        search_query = "",
+        sort_by = "name",
     }
     setmetatable(o, self)
     self.__index = self
@@ -24,15 +26,16 @@ function FolioBrowser:new(plugin_instance)
 end
 
 function FolioBrowser:show()
+    self.current_series_id = nil
+    self.series_stack = {}
     self.current_page = 1
-    self.search_query = ""
     self:load_and_render()
 end
 
 function FolioBrowser:load_and_render()
-    if not self.plugin.settings.token or self.plugin.settings.token == "" then
+    if not self.api:has_auth() then
         UIManager:show(InfoMessage:new{
-            text = _("Please log in to your Folio server first in Settings."),
+            text = _("Please enter your Folio API Key in Settings."),
             timeout = 4,
         })
         return
@@ -43,61 +46,86 @@ function FolioBrowser:load_and_render()
         timeout = 2,
     })
 
-    self.api:list_books(self.current_page, self.limit, self.search_query, function(success, response)
+    local offset = (self.current_page - 1) * self.limit
+
+    self.api:browse(self.current_series_id, self.sort_by, offset, self.limit, function(success, response)
         if not success or not response then
             UIManager:show(InfoMessage:new{
-                text = _("Failed to load books from Folio server."),
+                text = _("Failed to load library from Folio server."),
                 timeout = 4,
             })
             return
         end
 
-        local books = response.items or {}
-        local total = response.total or #books
+        local items = response.items or {}
+        local total = response.total or #items
 
-        self:render_menu(books, total)
+        self:render_menu(items, total)
     end)
 end
 
-function FolioBrowser:render_menu(books, total)
+function FolioBrowser:render_menu(items, total)
     local item_table = {}
 
-    -- Top controls: Search & Refresh
-    table.insert(item_table, {
-        text = self.search_query == "" and _("🔍 Search books...") or T(_("🔍 Filter: %1 (tap to clear)"), self.search_query),
-        callback = function()
-            if self.search_query ~= "" then
-                self.search_query = ""
+    -- Folder navigation: Back to parent series / root
+    if self.current_series_id and #self.series_stack > 0 then
+        local current = self.series_stack[#self.series_stack]
+        local current_name = current and current.name or _("Series")
+        table.insert(item_table, {
+            text = T(_("📁 .. (Back from %1)"), current_name),
+            callback = function()
+                table.remove(self.series_stack)
+                if #self.series_stack > 0 then
+                    self.current_series_id = self.series_stack[#self.series_stack].id
+                else
+                    self.current_series_id = nil
+                end
                 self.current_page = 1
                 self:load_and_render()
-            else
-                self:prompt_search()
-            end
+            end,
+        })
+    end
+
+    -- Sorting options
+    local sort_label = self.sort_by == "recent" and _("Recent") or (self.sort_by == "sortOrder" and _("Sort Order") or _("Name"))
+    table.insert(item_table, {
+        text = T(_("🔃 Sort: %1 (tap to change)"), sort_label),
+        callback = function()
+            self:prompt_sort_by()
         end,
     })
 
-    if #books == 0 then
+    if #items == 0 then
         table.insert(item_table, {
-            text = _("No books found on Folio server."),
+            text = _("No items found in this location."),
             enabled = false,
         })
     else
-        for _, book in ipairs(books) do
-            local title = book.title or _("Untitled")
-            local author = book.author or _("Unknown Author")
-            local progress_str = ""
-            if book.progress and book.progress.progressPercent then
-                progress_str = string.format(" [%d%%]", math.floor(book.progress.progressPercent))
+        for _, item in ipairs(items) do
+            local item_type = item.type or item.item_type or "book"
+            local name = item.name or item.title or _("Untitled")
+
+            if item_type == "series" then
+                table.insert(item_table, {
+                    text = string.format("📁 [Series] %s", name),
+                    callback = function()
+                        table.insert(self.series_stack, { id = item.id, name = name })
+                        self.current_series_id = item.id
+                        self.current_page = 1
+                        self:load_and_render()
+                    end,
+                })
+            else
+                local author = item.author or ""
+                local display_text = (author ~= "") and string.format("📖 %s - %s", name, author) or string.format("📖 %s", name)
+
+                table.insert(item_table, {
+                    text = display_text,
+                    callback = function()
+                        self:on_book_selected(item)
+                    end,
+                })
             end
-
-            local display_text = string.format("%s - %s%s", title, author, progress_str)
-
-            table.insert(item_table, {
-                text = display_text,
-                callback = function()
-                    self:on_book_selected(book)
-                end,
-            })
         end
     end
 
@@ -113,7 +141,8 @@ function FolioBrowser:render_menu(books, total)
         })
     end
 
-    local title_str = T(_("Folio Library (%1 books)"), total)
+    local location_title = (#self.series_stack > 0) and self.series_stack[#self.series_stack].name or _("Folio Library")
+    local title_str = T(_("%1 (%2 items)"), location_title, total)
     local menu = Menu:new{
         title = title_str,
         item_table = item_table,
@@ -123,32 +152,38 @@ function FolioBrowser:render_menu(books, total)
     UIManager:show(menu)
 end
 
-function FolioBrowser:prompt_search()
-    local dialog
-    dialog = InputDialog:new{
-        title = _("Search Folio Library"),
-        input = self.search_query,
-        buttons = {
-            {
-                text = _("Cancel"),
-                id = "cancel",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Search"),
-                is_default = true,
-                callback = function()
-                    self.search_query = dialog:getInputText()
-                    self.current_page = 1
-                    UIManager:close(dialog)
-                    self:load_and_render()
-                end,
-            },
+function FolioBrowser:prompt_sort_by()
+    local item_table = {
+        {
+            text = _("Sort by Name"),
+            callback = function()
+                self.sort_by = "name"
+                self.current_page = 1
+                self:load_and_render()
+            end,
+        },
+        {
+            text = _("Sort by Recently Added"),
+            callback = function()
+                self.sort_by = "recent"
+                self.current_page = 1
+                self:load_and_render()
+            end,
+        },
+        {
+            text = _("Sort by Series Order"),
+            callback = function()
+                self.sort_by = "sortOrder"
+                self.current_page = 1
+                self:load_and_render()
+            end,
         },
     }
-    UIManager:show(dialog)
+    local menu = Menu:new{
+        title = _("Select Sorting Order"),
+        item_table = item_table,
+    }
+    UIManager:show(menu)
 end
 
 function FolioBrowser:prompt_pagination(max_page)
@@ -180,8 +215,64 @@ function FolioBrowser:prompt_pagination(max_page)
 end
 
 function FolioBrowser:on_book_selected(book)
-    local download_dir = self.plugin.settings.download_dir or "/sdcard/books/FolioSync"
-    local clean_title = utils.sanitize_filename(book.title or "book")
+    local book_title = book.name or book.title or "book"
+    local default_dir = self.plugin.settings.download_dir
+
+    local item_table = {
+        {
+            text = T(_("📥 Download to default folder (%1)"), default_dir),
+            callback = function()
+                self:start_download(book, default_dir)
+            end,
+        },
+        {
+            text = _("📁 Choose custom download folder..."),
+            callback = function()
+                self:prompt_custom_download_dir(book, default_dir)
+            end,
+        },
+    }
+
+    local menu = Menu:new{
+        title = T(_("Download '%1'"), book_title),
+        item_table = item_table,
+    }
+    UIManager:show(menu)
+end
+
+function FolioBrowser:prompt_custom_download_dir(book, current_dir)
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Custom Download Folder"),
+        input = current_dir,
+        description = _("Enter folder path on device to save this book:"),
+        buttons = {
+            {
+                text = _("Cancel"),
+                id = "cancel",
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Download"),
+                is_default = true,
+                callback = function()
+                    local dir = dialog:getInputText()
+                    if dir and dir ~= "" then
+                        UIManager:close(dialog)
+                        self:start_download(book, utils.trim_slash(dir))
+                    end
+                end,
+            },
+        },
+    }
+    UIManager:show(dialog)
+end
+
+function FolioBrowser:start_download(book, download_dir)
+    local book_title = book.name or book.title or "book"
+    local clean_title = utils.sanitize_filename(book_title)
     local clean_author = utils.sanitize_filename(book.author or "")
     local filename = clean_author ~= "" and (clean_title .. " - " .. clean_author .. ".epub") or (clean_title .. ".epub")
     local target_path = download_dir .. "/" .. filename
@@ -196,9 +287,9 @@ function FolioBrowser:on_book_selected(book)
 
     local confirm_text
     if file_exists then
-        confirm_text = T(_("'%1' already exists on device. Redownload from Folio?"), filename)
+        confirm_text = T(_("'%1' already exists in '%2'. Redownload from Folio?"), filename, download_dir)
     else
-        confirm_text = T(_("Download '%1' from Folio server to '%2'?"), book.title, download_dir)
+        confirm_text = T(_("Download '%1' to '%2'?"), book_title, download_dir)
     end
 
     local confirm = ConfirmBox:new{
@@ -207,22 +298,23 @@ function FolioBrowser:on_book_selected(book)
         cancel_text = _("Cancel"),
         ok_callback = function()
             -- Ensure directory exists
-            lfs = pcall(require, "lfs")
+            pcall(require, "lfs")
             os.execute("mkdir -p \"" .. download_dir .. "\"")
 
             UIManager:show(InfoMessage:new{
-                text = T(_("Downloading '%1'..."), book.title),
+                text = T(_("Downloading '%1'..."), book_title),
                 timeout = 5,
             })
 
             self.api:download_book(book.id, target_path, function(success, res)
                 if success then
                     local open_box = ConfirmBox:new{
-                        text = T(_("'%1' downloaded successfully!\n\nDo you want to open it now?"), book.title),
+                        text = T(_("'%1' downloaded successfully to:\n%2\n\nDo you want to open it now?"), book_title, download_dir),
                         ok_text = _("Open Book"),
                         cancel_text = _("Close"),
                         ok_callback = function()
                             local Dispatcher = require("dispatcher")
+                            local Event = require("ui/event")
                             Dispatcher:sendEvent(Event:new("OpenDocument", target_path))
                         end,
                     }

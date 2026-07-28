@@ -59,7 +59,7 @@ end
 
 -- Synchronize reading progress for current document
 function Manager:sync_progress(ui, document, is_silent)
-    if not self.plugin.settings.token or self.plugin.settings.token == "" then
+    if not self.api:has_auth() then
         return
     end
 
@@ -101,9 +101,9 @@ end
 
 -- Synchronize annotations for current document
 function Manager:sync_annotations(ui, document, force_manual)
-    if not self.plugin.settings.token or self.plugin.settings.token == "" then
+    if not self.api:has_auth() then
         if force_manual then
-            utils.show_msg(_("Please log in to Folio in settings."))
+            utils.show_msg(_("Please set API Key in settings."))
         end
         return
     end

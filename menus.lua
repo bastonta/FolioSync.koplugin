@@ -2,7 +2,6 @@ local _ = require("gettext")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
-local MultiInputDialog = require("ui/widget/multiinputdialog")
 local T = require("ffi/util").template
 local logger = require("logger")
 local utils = require("utils")
@@ -70,15 +69,16 @@ function Menus:get_settings_sub_menu()
         },
         {
             text_func = function()
-                local email = self.plugin.settings.email or ""
-                if email ~= "" and self.plugin.settings.token then
-                    return T(_("Account: %1 (Logged In)"), email)
+                local key = self.plugin.settings.api_key or ""
+                if key ~= "" then
+                    local prefix = string.len(key) > 10 and (string.sub(key, 1, 10) .. "...") or key
+                    return T(_("🔑 API Key: %1"), prefix)
                 else
-                    return _("Account Login (Log in to Folio)")
+                    return _("🔑 API Key: Not Set (Tap to Enter API Key)")
                 end
             end,
             callback = function()
-                self:prompt_login()
+                self:prompt_api_key()
             end,
         },
         {
@@ -133,63 +133,6 @@ function Menus:prompt_server_url()
     UIManager:show(dialog)
 end
 
-function Menus:prompt_login()
-    local dialog
-    dialog = MultiInputDialog:new{
-        title = _("Log in to Folio Server"),
-        fields = {
-            {
-                description = _("Email address:"),
-                text = self.plugin.settings.email or "",
-            },
-            {
-                description = _("Password:"),
-                type = "password",
-                text = "",
-            },
-        },
-        buttons = {
-            {
-                text = _("Cancel"),
-                id = "cancel",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Log In"),
-                is_default = true,
-                callback = function()
-                    local values = dialog:getFields()
-                    local email = values[1]
-                    local password = values[2]
-
-                    if not email or email == "" or not password or password == "" then
-                        utils.show_msg(_("Email and password cannot be empty."))
-                        return
-                    end
-
-                    UIManager:show(InfoMessage:new{
-                        text = _("Connecting to Folio server..."),
-                        timeout = 3,
-                    })
-
-                    self.api:login(email, password, function(success, res)
-                        UIManager:close(dialog)
-                        if success then
-                            self.plugin:save_settings()
-                            utils.show_msg(T(_("Successfully logged in as %1!"), email))
-                        else
-                            utils.show_msg(T(_("Login failed: %1"), tostring(res)))
-                        end
-                    end)
-                end,
-            },
-        },
-    }
-    UIManager:show(dialog)
-end
-
 function Menus:prompt_download_dir()
     local dialog
     dialog = InputDialog:new{
@@ -215,6 +158,39 @@ function Menus:prompt_download_dir()
                         utils.show_msg(_("Download folder path updated."))
                     end
                     UIManager:close(dialog)
+                end,
+            },
+        },
+    }
+    UIManager:show(dialog)
+end
+
+function Menus:prompt_api_key()
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Folio API Key"),
+        input = self.plugin.settings.api_key or "",
+        description = _("Enter API key generated from your Folio profile."),
+        buttons = {
+            {
+                text = _("Cancel"),
+                id = "cancel",
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Save"),
+                is_default = true,
+                callback = function()
+                    local key = dialog:getInputText()
+                    if key then
+                        key = key:gsub("^%s*(.-)%s*$", "%1")
+                    end
+                    self.plugin.settings.api_key = key or ""
+                    self.plugin:save_settings()
+                    UIManager:close(dialog)
+                    utils.show_msg(_("API Key saved!"))
                 end,
             },
         },
