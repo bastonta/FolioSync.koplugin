@@ -85,6 +85,20 @@ function FolioSync:register_gestures()
         general = true,
     })
 
+    Dispatcher:registerAction("foliosync_push_doc", {
+        category = "none",
+        event = "FolioSyncPushDoc",
+        title = _("FolioSync: Push all data of active document"),
+        general = true,
+    })
+
+    Dispatcher:registerAction("foliosync_pull_doc", {
+        category = "none",
+        event = "FolioSyncPullDoc",
+        title = _("FolioSync: Fetch all data of active document"),
+        general = true,
+    })
+
     Dispatcher:registerAction("foliosync_sync_doc", {
         category = "none",
         event = "FolioSyncCurrentDoc",
@@ -98,10 +112,27 @@ function FolioSync:onFolioSyncBrowse()
     return true
 end
 
+function FolioSync:onFolioSyncPushDoc()
+    if self.ui and self.ui.document then
+        self.manager:push_all_data(self.ui, self.ui.document, true)
+    else
+        utils.show_msg(_("No active document open."))
+    end
+    return true
+end
+
+function FolioSync:onFolioSyncPullDoc()
+    if self.ui and self.ui.document then
+        self.manager:pull_all_data(self.ui, self.ui.document, true)
+    else
+        utils.show_msg(_("No active document open."))
+    end
+    return true
+end
+
 function FolioSync:onFolioSyncCurrentDoc()
     if self.ui and self.ui.document then
-        self.manager:sync_annotations(self.ui, self.ui.document, true)
-        self.manager:sync_progress(self.ui, self.ui.document, false)
+        self.manager:push_all_data(self.ui, self.ui.document, true)
     else
         utils.show_msg(_("No active document open."))
     end
