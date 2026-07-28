@@ -21,6 +21,7 @@ end
 function Menus:get_menu_structure()
     return {
         text = _("Folio Sync & Library"),
+        sorting_hint = "tools",
         sub_item_table = {
             {
                 text = _("📚 Browse & Download Books from Folio"),
@@ -111,22 +112,24 @@ function Menus:prompt_server_url()
         description = _("Enter the base URL of your self-hosted Folio backend."),
         buttons = {
             {
-                text = _("Cancel"),
-                id = "cancel",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Save"),
-                is_default = true,
-                callback = function()
-                    local url = dialog:getInputText()
-                    self.plugin.settings.server_url = utils.trim_slash(url)
-                    self.plugin:save_settings()
-                    UIManager:close(dialog)
-                    utils.show_msg(_("Server URL saved!"))
-                end,
+                {
+                    text = _("Cancel"),
+                    id = "cancel",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = _("Save"),
+                    is_default = true,
+                    callback = function()
+                        local url = dialog:getInputText()
+                        self.plugin.settings.server_url = utils.trim_slash(url)
+                        self.plugin:save_settings()
+                        UIManager:close(dialog)
+                        utils.show_msg(_("Server URL saved!"))
+                    end,
+                },
             },
         },
     }
@@ -141,24 +144,26 @@ function Menus:prompt_download_dir()
         description = _("Location on device where downloaded books will be stored."),
         buttons = {
             {
-                text = _("Cancel"),
-                id = "cancel",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Save"),
-                is_default = true,
-                callback = function()
-                    local dir = dialog:getInputText()
-                    if dir and dir ~= "" then
-                        self.plugin.settings.download_dir = dir
-                        self.plugin:save_settings()
-                        utils.show_msg(_("Download folder path updated."))
-                    end
-                    UIManager:close(dialog)
-                end,
+                {
+                    text = _("Cancel"),
+                    id = "cancel",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = _("Save"),
+                    is_default = true,
+                    callback = function()
+                        local dir = dialog:getInputText()
+                        if dir and dir ~= "" then
+                            self.plugin.settings.download_dir = dir
+                            self.plugin:save_settings()
+                            utils.show_msg(_("Download folder path updated."))
+                        end
+                        UIManager:close(dialog)
+                    end,
+                },
             },
         },
     }
@@ -173,25 +178,27 @@ function Menus:prompt_api_key()
         description = _("Enter API key generated from your Folio profile."),
         buttons = {
             {
-                text = _("Cancel"),
-                id = "cancel",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Save"),
-                is_default = true,
-                callback = function()
-                    local key = dialog:getInputText()
-                    if key then
-                        key = key:gsub("^%s*(.-)%s*$", "%1")
-                    end
-                    self.plugin.settings.api_key = key or ""
-                    self.plugin:save_settings()
-                    UIManager:close(dialog)
-                    utils.show_msg(_("API Key saved!"))
-                end,
+                {
+                    text = _("Cancel"),
+                    id = "cancel",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = _("Save"),
+                    is_default = true,
+                    callback = function()
+                        local key = dialog:getInputText()
+                        if key then
+                            key = key:gsub("^%s*(.-)%s*$", "%1")
+                        end
+                        self.plugin.settings.api_key = key or ""
+                        self.plugin:save_settings()
+                        UIManager:close(dialog)
+                        utils.show_msg(_("API Key saved!"))
+                    end,
+                },
             },
         },
     }

@@ -248,22 +248,24 @@ function FolioBrowser:prompt_custom_download_dir(book, current_dir)
         description = _("Enter folder path on device to save this book:"),
         buttons = {
             {
-                text = _("Cancel"),
-                id = "cancel",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Download"),
-                is_default = true,
-                callback = function()
-                    local dir = dialog:getInputText()
-                    if dir and dir ~= "" then
+                {
+                    text = _("Cancel"),
+                    id = "cancel",
+                    callback = function()
                         UIManager:close(dialog)
-                        self:start_download(book, utils.trim_slash(dir))
-                    end
-                end,
+                    end,
+                },
+                {
+                    text = _("Download"),
+                    is_default = true,
+                    callback = function()
+                        local dir = dialog:getInputText()
+                        if dir and dir ~= "" then
+                            UIManager:close(dialog)
+                            self:start_download(book, utils.trim_slash(dir))
+                        end
+                    end,
+                },
             },
         },
     }

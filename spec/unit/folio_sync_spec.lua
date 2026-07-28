@@ -72,3 +72,25 @@ describe("FolioSync API Key Authentication", function()
         assert.is_equal("application/json", headers["Content-Type"])
     end)
 end)
+
+describe("FolioSync Menu Structure", function()
+    local Menus = require("menus")
+
+    it("generates valid menu structure with tools sorting hint", function()
+        local fake_plugin = {
+            settings = {
+                server_url = "http://localhost:8080",
+                api_key = "test_key",
+                download_dir = "/sdcard/books",
+                auto_progress_sync = true,
+            },
+        }
+        local menus = Menus:new(fake_plugin)
+        local menu_structure = menus:get_menu_structure()
+
+        assert.is_not_nil(menu_structure)
+        assert.is_equal("tools", menu_structure.sorting_hint)
+        assert.is_equal("Folio Sync & Library", menu_structure.text)
+        assert.is_equal(4, #menu_structure.sub_item_table)
+    end)
+end)

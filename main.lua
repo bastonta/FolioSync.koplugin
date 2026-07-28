@@ -1,4 +1,4 @@
-local Widget = require("ui/widget/widget")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
 local Event = require("ui/event")
@@ -14,7 +14,7 @@ local utils = require("utils")
 
 local SETTINGS_FILE = DataStorage:getSettingsDir() .. "/folio_settings.json"
 
-local FolioSync = Widget:extend{
+local FolioSync = WidgetContainer:extend{
     name = "FolioSync",
     is_doc_only = false,
 }
@@ -26,9 +26,18 @@ function FolioSync:init()
     self.browser = FolioBrowser:new(self)
     self.menus = Menus:new(self)
 
+    self.manager.ui = self.ui
+    self.browser.ui = self.ui
+
     self:register_gestures()
     utils.insert_after_statistics("folio_sync")
-    self.ui.menu:registerSubmenu("folio_sync", self.menus:get_menu_structure())
+    if self.ui and self.ui.menu then
+        self.ui.menu:registerToMainMenu(self)
+    end
+end
+
+function FolioSync:addToMainMenu(menu_items)
+    menu_items.folio_sync = self.menus:get_menu_structure()
 end
 
 function FolioSync:onReaderReady(ui)
