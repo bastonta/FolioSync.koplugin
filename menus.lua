@@ -1,0 +1,225 @@
+local _ = require("gettext")
+local UIManager = require("ui/uimanager")
+local InfoMessage = require("ui/widget/infomessage")
+local InputDialog = require("ui/widget/inputdialog")
+local MultiInputDialog = require("ui/widget/multiinputdialog")
+local T = require("ffi/util").template
+local logger = require("logger")
+local utils = require("utils")
+
+local Menus = {}
+
+function Menus:new(plugin_instance)
+    local o = {
+        plugin = plugin_instance,
+        api = plugin_instance.api,
+    }
+    setmetatable(o, self)
+    self.__index = self
+    return o
+end
+
+function Menus:get_menu_structure()
+    return {
+        text = _("Folio Sync & Library"),
+        sub_item_table = {
+            {
+                text = _("📚 Browse & Download Books from Folio"),
+                callback = function()
+                    self.plugin.browser:show()
+                end,
+            },
+            {
+                text = _("🔄 Sync Active Document Annotations"),
+                callback = function()
+                    if self.plugin.ui and self.plugin.ui.document then
+                        self.plugin.manager:sync_annotations(self.plugin.ui, self.plugin.ui.document, true)
+                    else
+                        utils.show_msg(_("No document currently open."))
+                    end
+                end,
+            },
+            {
+                text = _("📍 Push Reading Progress to Folio"),
+                callback = function()
+                    if self.plugin.ui and self.plugin.ui.document then
+                        self.plugin.manager:sync_progress(self.plugin.ui, self.plugin.ui.document, false)
+                    else
+                        utils.show_msg(_("No document currently open."))
+                    end
+                end,
+            },
+            {
+                text = _("⚙️ Settings & Account"),
+                sub_item_table = self:get_settings_sub_menu(),
+            },
+        },
+    }
+end
+
+function Menus:get_settings_sub_menu()
+    return {
+        {
+            text_func = function()
+                local url = self.plugin.settings.server_url or _("Not set")
+                return T(_("Server URL: %1"), url)
+            end,
+            callback = function()
+                self:prompt_server_url()
+            end,
+        },
+        {
+            text_func = function()
+                local email = self.plugin.settings.email or ""
+                if email ~= "" and self.plugin.settings.token then
+                    return T(_("Account: %1 (Logged In)"), email)
+                else
+                    return _("Account Login (Log in to Folio)")
+                end
+            end,
+            callback = function()
+                self:prompt_login()
+            end,
+        },
+        {
+            text_func = function()
+                local dir = self.plugin.settings.download_dir or "/sdcard/books/FolioSync"
+                return T(_("Download Folder: %1"), dir)
+            end,
+            callback = function()
+                self:prompt_download_dir()
+            end,
+        },
+        {
+            text = _("Auto-sync Reading Progress"),
+            checked_func = function()
+                return self.plugin.settings.auto_progress_sync == true
+            end,
+            callback = function()
+                self.plugin.settings.auto_progress_sync = not self.plugin.settings.auto_progress_sync
+                self.plugin:save_settings()
+            end,
+        },
+    }
+end
+
+function Menus:prompt_server_url()
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Folio Server URL"),
+        input = self.plugin.settings.server_url or "http://192.168.1.100:8080",
+        description = _("Enter the base URL of your self-hosted Folio backend."),
+        buttons = {
+            {
+                text = _("Cancel"),
+                id = "cancel",
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Save"),
+                is_default = true,
+                callback = function()
+                    local url = dialog:getInputText()
+                    self.plugin.settings.server_url = utils.trim_slash(url)
+                    self.plugin:save_settings()
+                    UIManager:close(dialog)
+                    utils.show_msg(_("Server URL saved!"))
+                end,
+            },
+        },
+    }
+    UIManager:show(dialog)
+end
+
+function Menus:prompt_login()
+    local dialog
+    dialog = MultiInputDialog:new{
+        title = _("Log in to Folio Server"),
+        fields = {
+            {
+                description = _("Email address:"),
+                text = self.plugin.settings.email or "",
+            },
+            {
+                description = _("Password:"),
+                type = "password",
+                text = "",
+            },
+        },
+        buttons = {
+            {
+                text = _("Cancel"),
+                id = "cancel",
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Log In"),
+                is_default = true,
+                callback = function()
+                    local values = dialog:getFields()
+                    local email = values[1]
+                    local password = values[2]
+
+                    if not email or email == "" or not password or password == "" then
+                        utils.show_msg(_("Email and password cannot be empty."))
+                        return
+                    end
+
+                    UIManager:show(InfoMessage:new{
+                        text = _("Connecting to Folio server..."),
+                        timeout = 3,
+                    })
+
+                    self.api:login(email, password, function(success, res)
+                        UIManager:close(dialog)
+                        if success then
+                            self.plugin:save_settings()
+                            utils.show_msg(T(_("Successfully logged in as %1!"), email))
+                        else
+                            utils.show_msg(T(_("Login failed: %1"), tostring(res)))
+                        end
+                    end)
+                end,
+            },
+        },
+    }
+    UIManager:show(dialog)
+end
+
+function Menus:prompt_download_dir()
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Download Folder Path"),
+        input = self.plugin.settings.download_dir or "/sdcard/books/FolioSync",
+        description = _("Location on device where downloaded books will be stored."),
+        buttons = {
+            {
+                text = _("Cancel"),
+                id = "cancel",
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Save"),
+                is_default = true,
+                callback = function()
+                    local dir = dialog:getInputText()
+                    if dir and dir ~= "" then
+                        self.plugin.settings.download_dir = dir
+                        self.plugin:save_settings()
+                        utils.show_msg(_("Download folder path updated."))
+                    end
+                    UIManager:close(dialog)
+                end,
+            },
+        },
+    }
+    UIManager:show(dialog)
+end
+
+return Menus
