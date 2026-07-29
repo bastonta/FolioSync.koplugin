@@ -29,7 +29,7 @@ function FolioSync:init()
     self.manager.ui = self.ui
     self.browser.ui = self.ui
 
-    self:register_gestures()
+    self:onDispatcherRegisterActions()
     utils.insert_after_statistics("folio_sync")
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
@@ -44,6 +44,7 @@ function FolioSync:onReaderReady(ui)
     self.ui = ui
     self.manager.ui = ui
     self.browser.ui = ui
+    self:onDispatcherRegisterActions()
 end
 
 function FolioSync:load_settings()
@@ -77,34 +78,27 @@ function FolioSync:onCloseDocument()
     end
 end
 
-function FolioSync:register_gestures()
-    Dispatcher:registerAction("foliosync_browse", {
-        category = "none",
-        event = "FolioSyncBrowse",
-        title = _("FolioSync: Browse library"),
-        general = true,
-    })
+function FolioSync:onDispatcherRegisterActions()
+    Dispatcher:registerAction("foliosync_set_autosync",
+        { category="string", event="FolioSyncToggleAutoSync", title=_("FolioSync: Set auto progress sync"), reader=true,
+        args={true, false}, toggle={_("on"), _("off")},})
+    Dispatcher:registerAction("foliosync_toggle_autosync", { category="none", event="FolioSyncToggleAutoSync", title=_("FolioSync: Toggle auto progress sync"), reader=true,})
+    Dispatcher:registerAction("foliosync_push_doc", { category="none", event="FolioSyncPushDoc", title=_("FolioSync: Push document data to server"), reader=true,})
+    Dispatcher:registerAction("foliosync_pull_doc", { category="none", event="FolioSyncPullDoc", title=_("FolioSync: Pull document data from server"), reader=true,})
+    Dispatcher:registerAction("foliosync_sync_doc", { category="none", event="FolioSyncCurrentDoc", title=_("FolioSync: Sync active document"), reader=true, separator=true,})
+    Dispatcher:registerAction("foliosync_browse", { category="none", event="FolioSyncBrowse", title=_("FolioSync: Browse library"), general=true,})
+end
 
-    Dispatcher:registerAction("foliosync_push_doc", {
-        category = "none",
-        event = "FolioSyncPushDoc",
-        title = _("FolioSync: Push all data of active document"),
-        general = true,
-    })
-
-    Dispatcher:registerAction("foliosync_pull_doc", {
-        category = "none",
-        event = "FolioSyncPullDoc",
-        title = _("FolioSync: Fetch all data of active document"),
-        general = true,
-    })
-
-    Dispatcher:registerAction("foliosync_sync_doc", {
-        category = "none",
-        event = "FolioSyncCurrentDoc",
-        title = _("FolioSync: Sync active document"),
-        general = true,
-    })
+function FolioSync:onFolioSyncToggleAutoSync(enable)
+    if enable == nil then
+        self.settings.auto_progress_sync = not self.settings.auto_progress_sync
+    else
+        self.settings.auto_progress_sync = enable
+    end
+    self:save_settings()
+    local status = self.settings.auto_progress_sync and _("ON") or _("OFF")
+    utils.show_msg(string.format(_("Auto progress sync: %s"), status))
+    return true
 end
 
 function FolioSync:onFolioSyncBrowse()
@@ -132,6 +126,7 @@ end
 
 function FolioSync:onFolioSyncCurrentDoc()
     if self.ui and self.ui.document then
+        self.manager:pull_all_data(self.ui, self.ui.document, false)
         self.manager:push_all_data(self.ui, self.ui.document, true)
     else
         utils.show_msg(_("No active document open."))

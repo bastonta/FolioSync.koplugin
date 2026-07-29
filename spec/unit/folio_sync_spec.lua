@@ -94,3 +94,56 @@ describe("FolioSync Menu Structure", function()
         assert.is_equal(4, #menu_structure.sub_item_table)
     end)
 end)
+
+describe("FolioSync Gesture Actions Registration", function()
+    it("registers set_autosync, toggle_autosync, push, pull, sync, and browse actions via onDispatcherRegisterActions", function()
+        local registered_actions = {}
+        package.loaded["dispatcher"] = {
+            registerAction = function(self, action_id, def)
+                registered_actions[action_id] = def
+            end
+        }
+        package.loaded["ui/widget/container/widgetcontainer"] = {
+            extend = function(self, obj) return obj end
+        }
+        package.loaded["datastorage"] = {
+            getSettingsDir = function() return "/tmp" end
+        }
+        package.loaded["gettext"] = function(s) return s end
+        package.loaded["logger"] = { info = function() end, warn = function() end }
+
+        -- Force reload main module
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local instance = setmetatable({
+            load_settings = function() return {} end,
+        }, { __index = FolioSync })
+
+        instance:onDispatcherRegisterActions()
+
+        assert.is_not_nil(registered_actions["foliosync_set_autosync"])
+        assert.is_equal("string", registered_actions["foliosync_set_autosync"].category)
+        assert.is_true(registered_actions["foliosync_set_autosync"].reader)
+
+        assert.is_not_nil(registered_actions["foliosync_toggle_autosync"])
+        assert.is_equal("none", registered_actions["foliosync_toggle_autosync"].category)
+        assert.is_true(registered_actions["foliosync_toggle_autosync"].reader)
+
+        assert.is_not_nil(registered_actions["foliosync_push_doc"])
+        assert.is_equal("none", registered_actions["foliosync_push_doc"].category)
+        assert.is_true(registered_actions["foliosync_push_doc"].reader)
+
+        assert.is_not_nil(registered_actions["foliosync_pull_doc"])
+        assert.is_equal("none", registered_actions["foliosync_pull_doc"].category)
+        assert.is_true(registered_actions["foliosync_pull_doc"].reader)
+
+        assert.is_not_nil(registered_actions["foliosync_sync_doc"])
+        assert.is_equal("none", registered_actions["foliosync_sync_doc"].category)
+        assert.is_true(registered_actions["foliosync_sync_doc"].reader)
+        assert.is_true(registered_actions["foliosync_sync_doc"].separator)
+
+        assert.is_not_nil(registered_actions["foliosync_browse"])
+        assert.is_true(registered_actions["foliosync_browse"].general)
+    end)
+end)
