@@ -50,6 +50,44 @@ function FolioAPI:get_headers()
 end
 
 
+function FolioAPI:find_book_by_hash(file_hash, callback)
+    local base_url = self:get_server_url()
+    local url = base_url .. "/books/by-hash/" .. tostring(file_hash)
+
+    local http = get_http_client()
+    if not http then
+        if callback then callback(false, "HTTP client unavailable") end
+        return false, "HTTP client unavailable"
+    end
+
+    local response, err = http.get(url, self:get_headers())
+    if not response then
+        if callback then callback(false, tostring(err)) end
+        return false, tostring(err)
+    end
+
+    local code = response.code or response.status or 0
+    local body = response.body or response.content or ""
+
+    if code >= 200 and code < 300 then
+        local ok, data = pcall(json.decode, body)
+        if ok and data then
+            if callback then callback(true, data) end
+            return true, data
+        end
+    end
+
+    if code == 404 then
+        if callback then callback(false, "not_found") end
+        return false, "not_found"
+    end
+
+    local msg = "Failed to find book by hash (HTTP " .. tostring(code) .. ")"
+    if callback then callback(false, msg) end
+    return false, msg
+end
+
+
 function FolioAPI:browse(series_id, sort_by, offset, limit, callback)
     local base_url = self:get_server_url()
     offset = offset or 0

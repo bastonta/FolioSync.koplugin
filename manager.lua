@@ -18,6 +18,38 @@ function Manager:new(plugin_instance)
     return o
 end
 
+-- Compute SHA-256 hash of a file (matches Folio server algorithm)
+function Manager:compute_file_hash(file_path)
+    local sha2 = nil
+    -- Try to load sha2 from KOReader's ffi/sha2 or fallback to external
+    local ok, mod = pcall(require, "ffi/sha2")
+    if ok and mod then
+        sha2 = mod
+    end
+
+    if sha2 and sha2.sha256 then
+        local f = io.open(file_path, "rb")
+        if not f then return nil end
+        local content = f:read("*a")
+        f:close()
+        if not content then return nil end
+        return sha2.sha256(content)
+    end
+
+    -- Fallback: use sha256sum command if available
+    local cmd = string.format('sha256sum "%s"', file_path)
+    local handle = io.popen(cmd)
+    if not handle then return nil end
+    local result = handle:read("*a")
+    handle:close()
+    if result and result ~= "" then
+        local hash = result:match("^(%x+)")
+        return hash
+    end
+
+    return nil
+end
+
 -- Get or resolve Folio book_id for current document
 function Manager:resolve_book_id(document, callback)
     if not document or not document.file then
@@ -35,11 +67,39 @@ function Manager:resolve_book_id(document, callback)
         end
     end
 
-    -- 2. Try to match by title / filename via Folio API search
+    -- 2. Try to match by file hash via Folio API
+    local file_hash = self:compute_file_hash(document.file)
+    if file_hash then
+        logger.info("FolioSync Manager: resolving book_id by hash " .. file_hash)
+        self.api:find_book_by_hash(file_hash, function(success, response)
+            if success and response and response.id then
+                local book_id = response.id
+                logger.info("FolioSync Manager: matched hash to Folio book_id " .. tostring(book_id))
+                if docsettings then
+                    docsettings:saveSetting("folio_book_id", book_id)
+                end
+                if callback then callback(book_id) end
+                return
+            end
+
+            -- 3. Fallback: try to match by title / filename
+            logger.info("FolioSync Manager: hash lookup failed, falling back to title search")
+            self:resolve_book_id_by_title(document, callback)
+        end)
+    else
+        -- Hash computation failed, fall back to title search
+        logger.warn("FolioSync Manager: could not compute file hash, falling back to title search")
+        self:resolve_book_id_by_title(document, callback)
+    end
+end
+
+-- Fallback: resolve book_id by title search
+function Manager:resolve_book_id_by_title(document, callback)
+    local docsettings = document.docsettings
     local file_name = utils.get_file_basename(document.file)
     local title = file_name:gsub("%.%w+$", "")
 
-    logger.info("FolioSync Manager: resolving book_id for " .. title)
+    logger.info("FolioSync Manager: resolving book_id by title " .. title)
     self.api:list_books(1, 10, title, function(success, response)
         if success and response and response.items and #response.items > 0 then
             local matched_book = response.items[1]
@@ -56,6 +116,7 @@ function Manager:resolve_book_id(document, callback)
         end
     end)
 end
+
 
 -- Synchronize reading progress for current document
 function Manager:sync_progress(ui, document, is_silent)
