@@ -5,11 +5,79 @@ local utils = require("utils")
 local FolioAPI = {}
 
 local function get_http_client()
-    local ok, http = pcall(require, "httpclient")
-    if ok and http then
-        return http
+    local ok_http, sockethttp = pcall(require, "socket.http")
+    local ok_ltn12, ltn12 = pcall(require, "ltn12")
+    if not ok_http or not sockethttp or not ok_ltn12 or not ltn12 then
+        return nil
     end
-    return nil
+
+    -- Optionally use socketutil for timeout management
+    local ok_su, socketutil = pcall(require, "socketutil")
+
+    local client = {}
+
+    local function do_request(url, method, body, headers)
+        local response_body = {}
+        local request_params = {
+            url    = url,
+            method = method,
+            sink   = ltn12.sink.table(response_body),
+        }
+
+        if headers then
+            -- Make a copy so we don't mutate the caller's table
+            local h = {}
+            for k, v in pairs(headers) do h[k] = v end
+            if body then
+                h["Content-Length"] = tostring(#body)
+            end
+            request_params.headers = h
+        end
+
+        if body then
+            request_params.source = ltn12.source.string(body)
+        end
+
+        if ok_su and socketutil then
+            socketutil:set_timeout()
+        end
+
+        local res, code, resp_headers, status = sockethttp.request(request_params)
+
+        if ok_su and socketutil then
+            socketutil:reset_timeout()
+        end
+
+        if res == nil then
+            return nil, tostring(code) -- code contains the error message on failure
+        end
+
+        return {
+            code = code,
+            status = code,
+            body = table.concat(response_body),
+            content = table.concat(response_body),
+            headers = resp_headers,
+        }
+    end
+
+    function client.get(url, headers)
+        return do_request(url, "GET", nil, headers)
+    end
+
+    function client.post(url, body, headers)
+        return do_request(url, "POST", body, headers)
+    end
+
+    function client.put(url, body, headers)
+        return do_request(url, "PUT", body, headers)
+    end
+
+    function client.delete(url, headers)
+        return do_request(url, "DELETE", nil, headers)
+    end
+
+    return client
 end
 
 local function make_headers(api_key)
