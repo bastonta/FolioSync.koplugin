@@ -1,0 +1,355 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the FolioSync package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: FolioSync 1.0.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-30 12:45+0500\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+
+#: _meta.lua:5
+msgid "Folio Sync & Library"
+msgstr ""
+
+#: _meta.lua:6
+msgid "Sync annotations, reading progress, and download books directly from your Folio server."
+msgstr ""
+
+#: main.lua:84
+msgid "FolioSync: Browse library"
+msgstr ""
+
+#: main.lua:91
+msgid "FolioSync: Push all data of active document"
+msgstr ""
+
+#: main.lua:98
+msgid "FolioSync: Fetch all data of active document"
+msgstr ""
+
+#: main.lua:105
+msgid "FolioSync: Sync active document"
+msgstr ""
+
+#: main.lua:119 main.lua:128 main.lua:137 manager.lua:237 manager.lua:284
+msgid "No active document open."
+msgstr ""
+
+#: menus.lua:23
+msgid "Folio Sync & Library"
+msgstr ""
+
+#: menus.lua:27
+msgid "📚 Browse & Download Books from Folio"
+msgstr ""
+
+#: menus.lua:33
+msgid "📤 Push All Data of Active Document"
+msgstr ""
+
+#: menus.lua:38 menus.lua:48 menus.lua:58
+msgid "No document currently open."
+msgstr ""
+
+#: menus.lua:43
+msgid "📥 Fetch All Data of Active Document"
+msgstr ""
+
+#: menus.lua:53
+msgid "🔄 Sync Active Document Annotations"
+msgstr ""
+
+#: menus.lua:63
+msgid "⚙️ Settings & Account"
+msgstr ""
+
+#: menus.lua:74
+msgid "Not set"
+msgstr ""
+
+#: menus.lua:75
+msgid "Server URL: %1"
+msgstr ""
+
+#: menus.lua:86
+msgid "🔑 API Key: %1"
+msgstr ""
+
+#: menus.lua:88
+msgid "🔑 API Key: Not Set (Tap to Enter API Key)"
+msgstr ""
+
+#: menus.lua:98
+msgid "Download Folder: %1"
+msgstr ""
+
+#: menus.lua:105
+msgid "Auto-sync Reading Progress"
+msgstr ""
+
+#: menus.lua:120
+msgid "Folio Server URL"
+msgstr ""
+
+#: menus.lua:122
+msgid "Enter the base URL of your self-hosted Folio backend."
+msgstr ""
+
+#: menus.lua:126 menus.lua:158 menus.lua:252 menus.lua:300
+msgid "Cancel"
+msgstr ""
+
+#: menus.lua:133 menus.lua:165
+msgid "Save"
+msgstr ""
+
+#: menus.lua:140
+msgid "Server URL saved!"
+msgstr ""
+
+#: menus.lua:152
+msgid "Download Folder Path"
+msgstr ""
+
+#: menus.lua:154
+msgid "Location on device where downloaded books will be stored."
+msgstr ""
+
+#: menus.lua:172
+msgid "Download folder path updated."
+msgstr ""
+
+#: menus.lua:186
+msgid "Folio API Key"
+msgstr ""
+
+#: menus.lua:188
+msgid "Enter API key generated from your Folio profile."
+msgstr ""
+
+#: menus.lua:199 menus.lua:209
+msgid "Save"
+msgstr ""
+
+#: menus.lua:209
+msgid "API Key saved!"
+msgstr ""
+
+#: browser.lua:38
+msgid "Please enter your Folio API Key in Settings."
+msgstr ""
+
+#: browser.lua:45
+msgid "Fetching library from Folio..."
+msgstr ""
+
+#: browser.lua:54
+msgid "Failed to load library from Folio server."
+msgstr ""
+
+#: browser.lua:73
+msgid "Series"
+msgstr ""
+
+#: browser.lua:75
+msgid "📁 .. (Back from %1)"
+msgstr ""
+
+#: browser.lua:90
+msgid "Recent"
+msgstr ""
+
+#: browser.lua:90
+msgid "Sort Order"
+msgstr ""
+
+#: browser.lua:90
+msgid "Name"
+msgstr ""
+
+#: browser.lua:92
+msgid "🔃 Sort: %1 (tap to change)"
+msgstr ""
+
+#: browser.lua:100
+msgid "No items found in this location."
+msgstr ""
+
+#: browser.lua:106
+msgid "Untitled"
+msgstr ""
+
+#: browser.lua:135
+msgid "Page %1 of %2"
+msgstr ""
+
+#: browser.lua:144
+msgid "Folio Library"
+msgstr ""
+
+#: browser.lua:145
+msgid "%1 (%2 items)"
+msgstr ""
+
+#: browser.lua:158
+msgid "Sort by Name"
+msgstr ""
+
+#: browser.lua:166
+msgid "Sort by Recently Added"
+msgstr ""
+
+#: browser.lua:174
+msgid "Sort by Series Order"
+msgstr ""
+
+#: browser.lua:183
+msgid "Select Sorting Order"
+msgstr ""
+
+#: browser.lua:193
+msgid "◀ Previous Page"
+msgstr ""
+
+#: browser.lua:202
+msgid "Next Page ▶"
+msgstr ""
+
+#: browser.lua:211
+msgid "Select Page"
+msgstr ""
+
+#: browser.lua:223
+msgid "📥 Download to default folder (%1)"
+msgstr ""
+
+#: browser.lua:229
+msgid "📁 Choose custom download folder..."
+msgstr ""
+
+#: browser.lua:237
+msgid "Download '%1'"
+msgstr ""
+
+#: browser.lua:246
+msgid "Custom Download Folder"
+msgstr ""
+
+#: browser.lua:248
+msgid "Enter folder path on device to save this book:"
+msgstr ""
+
+#: browser.lua:259
+msgid "Download"
+msgstr ""
+
+#: browser.lua:292
+msgid "'%1' already exists in '%2'. Redownload from Folio?"
+msgstr ""
+
+#: browser.lua:294
+msgid "Download '%1' to '%2'?"
+msgstr ""
+
+#: browser.lua:299
+msgid "Redownload"
+msgstr ""
+
+#: browser.lua:307
+msgid "Downloading '%1'..."
+msgstr ""
+
+#: browser.lua:314
+msgid "'%1' downloaded successfully to:\n%2\n\nDo you want to open it now?"
+msgstr ""
+
+#: browser.lua:315
+msgid "Open Book"
+msgstr ""
+
+#: browser.lua:316
+msgid "Close"
+msgstr ""
+
+#: browser.lua:326
+msgid "Failed to download book: %1"
+msgstr ""
+
+#: manager.lua:130
+msgid "Document not matched on Folio server."
+msgstr ""
+
+#: manager.lua:155
+msgid "Progress synced to Folio (%1%%)"
+msgstr ""
+
+#: manager.lua:167 manager.lua:230 manager.lua:277
+msgid "Please set API Key in settings."
+msgstr ""
+
+#: manager.lua:175
+msgid "Book not found in Folio library."
+msgstr ""
+
+#: manager.lua:181
+msgid "Syncing annotations with Folio..."
+msgstr ""
+
+#: manager.lua:188
+msgid "Failed to fetch remote annotations."
+msgstr ""
+
+#: manager.lua:219
+msgid "Annotations synchronized with Folio!"
+msgstr ""
+
+#: manager.lua:245 manager.lua:291
+msgid "Document not matched on Folio server."
+msgstr ""
+
+#: manager.lua:251
+msgid "Pushing all document data to Folio..."
+msgstr ""
+
+#: manager.lua:263
+msgid "All document data sent to Folio (%1%%)!"
+msgstr ""
+
+#: manager.lua:265
+msgid "Failed to push progress to Folio."
+msgstr ""
+
+#: manager.lua:298
+msgid "Fetching document data from Folio..."
+msgstr ""
+
+#: manager.lua:318
+msgid "Progress: %1%%"
+msgstr ""
+
+#: manager.lua:350
+msgid "Progress updated"
+msgstr ""
+
+#: manager.lua:350
+msgid "Up to date"
+msgstr ""
+
+#: manager.lua:350
+msgid "Fetched remote data: %1 (%2 new annotations)"
+msgstr ""
+
+#: manager.lua:352
+msgid "Fetched remote data: %1"
+msgstr ""

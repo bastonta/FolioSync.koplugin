@@ -3,7 +3,8 @@ local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
 local Event = require("ui/event")
 local UIManager = require("ui/uimanager")
-local _ = require("gettext")
+local gettext = require("gettext")
+local _ = gettext
 local logger = require("logger")
 
 local FolioAPI = require("folio_api")
@@ -30,6 +31,19 @@ function FolioSync:init()
     self.browser.ui = self.ui
 
     self:register_gestures()
+
+    -- Load plugin translations dynamically if available for the active locale
+    local lang = gettext.current_lang
+    if lang and lang ~= "C" and lang ~= "" then
+        local path = self.path or "plugins/FolioSync.koplugin"
+        local mo_path = string.format("%s/l10n/%s/folio_sync.mo", path, lang)
+        local f = io.open(mo_path, "r")
+        if f then
+            f:close()
+            gettext.loadMO(mo_path)
+        end
+    end
+
     utils.insert_after_statistics("folio_sync")
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
