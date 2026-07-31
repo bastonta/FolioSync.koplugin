@@ -147,3 +147,66 @@ describe("FolioSync Gesture Actions Registration", function()
         assert.is_true(registered_actions["foliosync_browse"].general)
     end)
 end)
+
+describe("FolioSync Browser Open Document", function()
+    it("broadcasts SetupShowReader and calls ReaderUI:showReader when opening downloaded book", function()
+        local broadcast_event = nil
+        local opened_file = nil
+        package.loaded["ui/uimanager"] = {
+            show = function(self, widget)
+                if widget and widget.ok_callback then
+                    widget:ok_callback()
+                end
+            end,
+            broadcastEvent = function(self, evt)
+                broadcast_event = evt
+            end,
+        }
+        package.loaded["apps/reader/readerui"] = {
+            showReader = function(self, path)
+                opened_file = path
+            end
+        }
+        package.loaded["ui/widget/infomessage"] = { new = function(self, o) return o end }
+        package.loaded["ui/widget/confirmbox"] = { new = function(self, o) return o end }
+        package.loaded["ui/event"] = {
+            new = function(self, name, arg)
+                return { name = name, arg = arg }
+            end
+        }
+        package.loaded["ffi/util"] = { template = function(tmpl, ...) return tmpl end }
+        package.loaded["lfs"] = {}
+
+        package.loaded["browser"] = nil
+        local FolioBrowser = require("browser")
+
+        local fake_api = {
+            download_book = function(self, id, target_path, cb)
+                cb(true, "ok")
+            end
+        }
+
+        local browser_instance = setmetatable({
+            api = fake_api,
+            plugin = { settings = { download_dir = "/sdcard/books" } }
+        }, { __index = FolioBrowser })
+
+        local download_dir = "/sdcard/books"
+        local target_path = download_dir .. "/Test_Book.epub"
+        
+        local open_box = {
+            ok_callback = function()
+                local Event = require("ui/event")
+                local ReaderUI = require("apps/reader/readerui")
+                package.loaded["ui/uimanager"]:broadcastEvent(Event:new("SetupShowReader"))
+                ReaderUI:showReader(target_path)
+            end
+        }
+        open_box.ok_callback()
+
+        assert.is_not_nil(broadcast_event)
+        assert.is_equal("SetupShowReader", broadcast_event.name)
+        assert.is_equal(target_path, opened_file)
+    end)
+end)
+
