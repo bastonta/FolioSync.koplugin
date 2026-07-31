@@ -146,4 +146,19 @@ describe("FolioSync Gesture Actions Registration", function()
         assert.is_not_nil(registered_actions["foliosync_browse"])
         assert.is_true(registered_actions["foliosync_browse"].general)
     end)
+
+    it("registers itself into self.ui child list during init()", function()
+        local dummy_ui = {}
+        local instance = {
+            ui = dummy_ui,
+            load_settings = function() return {} end,
+            onDispatcherRegisterActions = function() end,
+        }
+        setmetatable(instance, { __index = require("main") })
+
+        instance:init()
+
+        assert.is_equal(1, #dummy_ui)
+        assert.is_equal(instance, dummy_ui[1])
+    end)
 end)

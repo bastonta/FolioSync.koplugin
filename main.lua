@@ -30,6 +30,20 @@ function FolioSync:init()
     self.manager.ui = self.ui
     self.browser.ui = self.ui
 
+    -- Ensure the plugin is in the ReaderUI event chain
+    if self.ui then
+        local found = false
+        for _, child in ipairs(self.ui) do
+            if child == self then
+                found = true
+                break
+            end
+        end
+        if not found then
+            table.insert(self.ui, self)
+        end
+    end
+
     self:onDispatcherRegisterActions()
 
     -- Load plugin translations dynamically if available for the active locale
@@ -52,13 +66,6 @@ end
 
 function FolioSync:addToMainMenu(menu_items)
     menu_items.folio_sync = self.menus:get_menu_structure()
-end
-
-function FolioSync:onReaderReady(ui)
-    self.ui = ui
-    self.manager.ui = ui
-    self.browser.ui = ui
-    self:onDispatcherRegisterActions()
 end
 
 function FolioSync:load_settings()

@@ -315,9 +315,12 @@ function FolioBrowser:start_download(book, download_dir)
                         ok_text = _("Open Book"),
                         cancel_text = _("Close"),
                         ok_callback = function()
-                            local Dispatcher = require("dispatcher")
                             local Event = require("ui/event")
-                            Dispatcher:sendEvent(Event:new("OpenDocument", target_path))
+                            if self.plugin and self.plugin.ui and self.plugin.ui.handleEvent then
+                                self.plugin.ui:handleEvent(Event:new("OpenDocument", target_path))
+                            else
+                                UIManager:sendEvent(Event:new("OpenDocument", target_path))
+                            end
                         end,
                     }
                     UIManager:show(open_box)

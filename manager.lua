@@ -1,5 +1,6 @@
 local _ = require("gettext")
 local UIManager = require("ui/uimanager")
+local Event = require("ui/event")
 local InfoMessage = require("ui/widget/infomessage")
 local T = require("ffi/util").template
 local logger = require("logger")
@@ -301,21 +302,47 @@ function Manager:pull_all_data(ui, document, force_manual)
         self.api:get_progress(book_id, function(prog_ok, remote_data)
             local progress_msg = ""
             if prog_ok and remote_data then
-                local remote_cfi = remote_data.cfi or remote_data.cfiRange
+                local raw_cfi = remote_data.cfi or remote_data.cfiRange
+                local remote_cfi = utils.clean_cfi(raw_cfi)
                 local remote_percent = remote_data.progressPercent or remote_data.progress_percent
-                if remote_cfi and remote_cfi ~= "" and ui.link and ui.link.onGoToCFI then
-                    ui.link:onGoToCFI(remote_cfi)
+                local remote_page = remote_data.page or remote_data.target_page
+
+                local target_page = nil
+                if remote_page and tonumber(remote_page) then
+                    target_page = tonumber(remote_page)
                 elseif remote_percent and ui.document then
                     local total_pages = ui.document:getPageCount()
                     if total_pages and total_pages > 0 then
-                        local target_page = math.max(1, math.min(total_pages, math.floor((remote_percent / 100) * total_pages)))
-                        if ui.link and ui.link.goToPage then
-                            ui.link:goToPage(target_page)
+                        target_page = math.max(1, math.min(total_pages, math.floor((remote_percent / 100) * total_pages)))
+                    end
+                end
+
+                local jumped = false
+                -- 1. Try XPointer navigation if valid for current KOReader document engine
+                if remote_cfi and remote_cfi ~= "" and ui.document and ui.document.isXPointerInDocument then
+                    if ui.document:isXPointerInDocument(remote_cfi) then
+                        if ui.link and ui.link.onGotoLink then
+                            ui.link:onGotoLink({ xpointer = remote_cfi })
+                            jumped = true
                         end
                     end
                 end
+
+                -- 2. Fallback to page/percentage navigation (smooth and error-free for EPUB CFI & percentage)
+                if not jumped and target_page then
+                    if ui.link and ui.link.onGotoPage then
+                        ui.link:onGotoPage(target_page)
+                        jumped = true
+                    elseif ui.handleEvent then
+                        ui:handleEvent(Event:new("GotoPage", target_page))
+                        jumped = true
+                    end
+                end
+
                 if remote_percent then
                     progress_msg = T(_("Progress: %1%%"), math.floor(remote_percent))
+                elseif target_page then
+                    progress_msg = T(_("Page %1"), target_page)
                 end
             end
 
@@ -342,6 +369,37 @@ function Manager:pull_all_data(ui, document, force_manual)
 
                     if added_count > 0 and docsettings then
                         docsettings:saveSetting("bookmark", local_bookmarks)
+                        docsettings:saveSetting("annotations", local_bookmarks)
+
+                        -- Update in-memory active KOReader UI widgets if open
+                        if ui then
+                            if ui.bookmark then
+                                ui.bookmark.bookmark = local_bookmarks
+                                if ui.bookmark.onSaveSettings then
+                                    ui.bookmark:onSaveSettings()
+                                end
+                            end
+                            if ui.annotation then
+                                ui.annotation.annotations = local_bookmarks
+                                if ui.annotation.onSaveSettings then
+                                    ui.annotation:onSaveSettings()
+                                end
+                            end
+
+                            -- Broadcast events to notify KOReader UI components
+                            UIManager:broadcastEvent(Event:new("AnnotationsModified", local_bookmarks))
+                            UIManager:broadcastEvent(Event:new("BookmarksModified", local_bookmarks))
+
+                            -- Redraw view so highlights and annotations display immediately
+                            if not document.is_pdf then
+                                if document.render then document:render() end
+                                if ui.view and ui.view.recalculate then ui.view:recalculate() end
+                                if ui.view and ui.view.dialog then UIManager:setDirty(ui.view.dialog, "partial") end
+                            else
+                                if document.resetTileCacheValidity then document:resetTileCacheValidity() end
+                                if ui.view and ui.view.dialog then UIManager:setDirty(ui.view.dialog, "ui") end
+                            end
+                        end
                     end
                 end
 

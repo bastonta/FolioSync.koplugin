@@ -1,4 +1,5 @@
 local logger = require("logger")
+local utils = require("utils")
 
 local M = {}
 
@@ -24,13 +25,33 @@ function M.folio_to_koreader_annotation(folio_item)
 
     local text = folio_item.selectedText or folio_item.selected_text or ""
     local note = folio_item.note or ""
-    local cfi = folio_item.cfiRange or folio_item.cfi_range or ""
+    local raw_cfi = folio_item.cfiRange or folio_item.cfi_range or folio_item.cfi or ""
+    local cfi = utils.clean_cfi(raw_cfi) or ""
+
+    local pos0, pos1
+    if cfi ~= "" then
+        local s, e = cfi:match("^(.-)%-(.-)$")
+        if s and e and not cfi:find("^page_") then
+            pos0 = s
+            pos1 = e
+        else
+            pos0 = cfi
+            pos1 = cfi
+        end
+    end
+
+    local page_num = folio_item.page
+    if not page_num and cfi:find("^page_%d+") then
+        page_num = tonumber(cfi:match("^page_(%d+)"))
+    end
 
     local kr_item = {
         datetime = folio_item.updatedAt or folio_item.updated_at or folio_item.createdAt or "",
         text = text ~= "" and text or nil,
         notes = note ~= "" and note or nil,
-        pos0 = cfi,
+        pos0 = pos0,
+        pos1 = pos1,
+        page = page_num,
         color = folio_item.color or "yellow",
         type = (text ~= "" or note ~= "") and "highlight" or "bookmark",
         folio_id = folio_item.id,
@@ -45,8 +66,8 @@ function M.is_same_annotation(item_a, item_b)
     if item_a.folio_id and item_b.folio_id and item_a.folio_id == item_b.folio_id then
         return true
     end
-    local pos_a = item_a.pos0 or item_a.cfiRange or item_a.cfi_range or ""
-    local pos_b = item_b.pos0 or item_b.cfiRange or item_b.cfi_range or ""
+    local pos_a = utils.clean_cfi(item_a.pos0 or item_a.cfiRange or item_a.cfi_range) or ""
+    local pos_b = utils.clean_cfi(item_b.pos0 or item_b.cfiRange or item_b.cfi_range) or ""
 
     if pos_a ~= "" and pos_a == pos_b then
         return true
