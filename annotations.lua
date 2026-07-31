@@ -40,7 +40,7 @@ function M.folio_to_koreader_annotation(folio_item)
     return kr_item
 end
 
--- Compare whether two annotations match by CFI / position
+-- Compare whether two annotations match by location / position
 function M.is_same_annotation(item_a, item_b)
     if not item_a or not item_b then return false end
     if item_a.folio_id and item_b.folio_id and item_a.folio_id == item_b.folio_id then

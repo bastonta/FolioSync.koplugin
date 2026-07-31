@@ -308,12 +308,12 @@ function FolioAPI:get_progress(book_id, callback)
     return false
 end
 
-function FolioAPI:update_progress(book_id, cfi, progress_percent, callback)
+function FolioAPI:update_progress(book_id, location, progress_percent, callback)
     local base_url = self:get_server_url()
-    local url = base_url .. "/books/" .. tostring(book_id) .. "/progress"
+    local url = base_url .. "/books/" .. tostring(book_id) .. "/progress?format=xpointer"
 
     local payload = json.encode({
-        location = cfi or "",
+        location = location or "",
         progressPercent = progress_percent or 0.0,
     })
 
@@ -372,7 +372,7 @@ end
 
 function FolioAPI:create_annotation(book_id, annotation, callback)
     local base_url = self:get_server_url()
-    local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations"
+    local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations?format=xpointer"
 
     local payload = json.encode({
         locationStart = annotation.locationStart or "",
@@ -411,7 +411,7 @@ end
 
 function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback)
     local base_url = self:get_server_url()
-    local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id)
+    local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id) .. "?format=xpointer"
 
     local payload = json.encode({
         locationStart = annotation.locationStart or "",
@@ -502,10 +502,10 @@ end
 
 function FolioAPI:create_bookmark(book_id, bookmark, callback)
     local base_url = self:get_server_url()
-    local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks"
+    local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks?format=xpointer"
 
     local payload = json.encode({
-        location = bookmark.location or bookmark.cfi or "",
+        location = bookmark.location or "",
         title = bookmark.title or "Bookmark",
     })
 

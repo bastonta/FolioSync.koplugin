@@ -26,7 +26,7 @@ describe("FolioSync Annotation Conversion", function()
     it("converts Folio REST annotation response item to KOReader bookmark format", function()
         local folio_item = {
             id = "12345678-1234-1234-1234-123456789abc",
-            locationStart = "epubcfi(/6/4!/4/2/1:0)",
+            locationStart = "/6/4!/4/2/1:0",
             selectedText = "Sample quote from ebook",
             note = "Important reflection",
             color = "blue",
@@ -38,7 +38,7 @@ describe("FolioSync Annotation Conversion", function()
         assert.is_not_nil(kr_item)
         assert.is_equal("Sample quote from ebook", kr_item.text)
         assert.is_equal("Important reflection", kr_item.notes)
-        assert.is_equal("epubcfi(/6/4!/4/2/1:0)", kr_item.pos0)
+        assert.is_equal("/6/4!/4/2/1:0", kr_item.pos0)
         assert.is_equal("blue", kr_item.color)
         assert.is_equal("12345678-1234-1234-1234-123456789abc", kr_item.folio_id)
     end)

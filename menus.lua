@@ -32,31 +32,19 @@ function Menus:get_menu_structure()
             {
                 text = _("📤 Push All Data of Active Document"),
                 callback = function()
-                    if self.plugin.ui and self.plugin.ui.document then
-                        self.plugin.manager:push_all_data(self.plugin.ui, self.plugin.ui.document, true)
-                    else
-                        utils.show_msg(_("No document currently open."))
-                    end
+                    self.plugin.manager:push_all_data(self.plugin.ui, nil, true)
                 end,
             },
             {
                 text = _("📥 Fetch All Data of Active Document"),
                 callback = function()
-                    if self.plugin.ui and self.plugin.ui.document then
-                        self.plugin.manager:pull_all_data(self.plugin.ui, self.plugin.ui.document, true)
-                    else
-                        utils.show_msg(_("No document currently open."))
-                    end
+                    self.plugin.manager:pull_all_data(self.plugin.ui, nil, true)
                 end,
             },
             {
                 text = _("🔄 Sync Active Document Annotations"),
                 callback = function()
-                    if self.plugin.ui and self.plugin.ui.document then
-                        self.plugin.manager:sync_annotations(self.plugin.ui, self.plugin.ui.document, true)
-                    else
-                        utils.show_msg(_("No document currently open."))
-                    end
+                    self.plugin.manager:sync_annotations(self.plugin.ui, nil, true)
                 end,
             },
             {

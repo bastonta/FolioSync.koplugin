@@ -51,17 +51,159 @@ function Manager:compute_file_hash(file_path)
     return nil
 end
 
+-- Extract document metadata and settings from whatever object is available (ReaderUI, Document, or DocSettings)
+function Manager:get_doc_info(ui, document)
+    local target_ui = ui or self.ui
+    local target_doc = document or (target_ui and target_ui.document)
+
+    local file_path = nil
+    local title = nil
+    local total_pages = 1
+    local current_page = 1
+    local location = nil
+    local percent = 0
+    local docsettings = nil
+
+    -- 1. Try target_doc
+    if target_doc then
+        if type(target_doc) == "table" or type(target_doc) == "userdata" then
+            if target_doc.file then file_path = target_doc.file end
+            if target_doc.getPageCount then
+                local ok, count = pcall(function() return target_doc:getPageCount() end)
+                if ok and count then total_pages = count end
+            end
+            if target_doc.docsettings then docsettings = target_doc.docsettings end
+        end
+    end
+
+    -- 2. Try target_ui
+    if target_ui then
+        if not file_path and target_ui.document and target_ui.document.file then
+            file_path = target_ui.document.file
+        end
+        if total_pages == 1 and target_ui.document and target_ui.document.getPageCount then
+            local ok, count = pcall(function() return target_ui.document:getPageCount() end)
+            if ok and count then total_pages = count end
+        end
+        if target_ui.link and target_ui.link.getPage then
+            local ok, page = pcall(function() return target_ui.link:getPage() end)
+            if ok and page then current_page = page end
+        end
+        if target_ui.view and target_ui.view.getXPointer then
+            local ok, xptr = pcall(function() return target_ui.view:getXPointer() end)
+            if ok and xptr then location = xptr end
+        end
+        if not docsettings and target_ui.doc_settings then
+            docsettings = target_ui.doc_settings
+        end
+        if not docsettings and target_ui.docsettings then
+            docsettings = target_ui.docsettings
+        end
+    end
+
+    -- 3. Check DocSettings object directly (if target_ui or target_doc IS a DocSettings instance)
+    local ds_candidate = docsettings or (target_ui and target_ui.data and target_ui) or (target_doc and target_doc.data and target_doc)
+    if ds_candidate and ds_candidate.data then
+        local data = ds_candidate.data
+        if not file_path and data.doc_path then
+            file_path = data.doc_path
+        end
+        if not title and data.doc_props and data.doc_props.title then
+            title = data.doc_props.title
+        end
+        if total_pages == 1 and data.doc_pages then
+            total_pages = data.doc_pages
+        end
+        if not location and data.last_xpointer then
+            location = data.last_xpointer
+        end
+        if percent == 0 and data.percent_finished then
+            percent = data.percent_finished * 100
+        end
+        if not docsettings then
+            docsettings = ds_candidate
+        end
+    end
+
+    -- Fallbacks: try UIManager stack if file_path is still missing
+    if not file_path then
+        local ok, UIMgr = pcall(require, "ui/uimanager")
+        if ok and UIMgr then
+            local stack = UIMgr._stack or UIMgr.stack or {}
+            for i = #stack, 1, -1 do
+                local widget = stack[i]
+                if widget then
+                    if widget.document and widget.document.file then
+                        file_path = widget.document.file
+                        target_ui = widget
+                        target_doc = widget.document
+                        break
+                    elseif widget.doc_settings and widget.doc_settings.data and widget.doc_settings.data.doc_path then
+                        file_path = widget.doc_settings.data.doc_path
+                        docsettings = widget.doc_settings
+                        target_ui = widget
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    if not file_path then
+        return nil
+    end
+
+    if not title then
+        title = utils.get_file_basename(file_path):gsub("%.%w+$", "")
+    end
+    if not location and current_page then
+        location = string.format("page_%d", current_page)
+    end
+    if percent == 0 and total_pages > 0 and current_page > 1 then
+        percent = (current_page / total_pages) * 100
+    end
+
+    return {
+        file = file_path,
+        title = title,
+        total_pages = total_pages,
+        current_page = current_page,
+        location = location,
+        percent = percent,
+        docsettings = docsettings,
+        ui = target_ui,
+        document = target_doc,
+    }
+end
+
 -- Get or resolve Folio book_id for current document
-function Manager:resolve_book_id(document, callback)
-    if not document or not document.file then
+function Manager:resolve_book_id(ui_or_doc, callback_or_doc, maybe_callback)
+    local ui = self.ui
+    local document = nil
+    local callback = nil
+
+    if type(callback_or_doc) == "function" then
+        callback = callback_or_doc
+        if ui_or_doc and (type(ui_or_doc) == "table" or type(ui_or_doc) == "userdata") and ui_or_doc.file then
+            document = ui_or_doc
+        else
+            ui = ui_or_doc
+        end
+    else
+        ui = ui_or_doc
+        document = callback_or_doc
+        callback = maybe_callback
+    end
+
+    local info = self:get_doc_info(ui, document)
+    if not info or not info.file then
         if callback then callback(nil) end
         return nil
     end
 
     -- 1. Check if stored in docsettings
-    local docsettings = document.docsettings
-    if docsettings then
-        local stored_id = docsettings:readSetting("folio_book_id")
+    if info.docsettings and info.docsettings.readSetting then
+        local stored_id = info.docsettings:readSetting("folio_book_id")
         if stored_id and stored_id ~= "" then
             if callback then callback(stored_id) end
             return stored_id
@@ -69,15 +211,15 @@ function Manager:resolve_book_id(document, callback)
     end
 
     -- 2. Try to match by file hash via Folio API
-    local file_hash = self:compute_file_hash(document.file)
+    local file_hash = self:compute_file_hash(info.file)
     if file_hash then
         logger.info("FolioSync Manager: resolving book_id by hash " .. file_hash)
         self.api:find_book_by_hash(file_hash, function(success, response)
             if success and response and response.id then
                 local book_id = response.id
                 logger.info("FolioSync Manager: matched hash to Folio book_id " .. tostring(book_id))
-                if docsettings then
-                    docsettings:saveSetting("folio_book_id", book_id)
+                if info.docsettings and info.docsettings.saveSetting then
+                    info.docsettings:saveSetting("folio_book_id", book_id)
                 end
                 if callback then callback(book_id) end
                 return
@@ -85,20 +227,18 @@ function Manager:resolve_book_id(document, callback)
 
             -- 3. Fallback: try to match by title / filename
             logger.info("FolioSync Manager: hash lookup failed, falling back to title search")
-            self:resolve_book_id_by_title(document, callback)
+            self:resolve_book_id_by_info(info, callback)
         end)
     else
         -- Hash computation failed, fall back to title search
         logger.warn("FolioSync Manager: could not compute file hash, falling back to title search")
-        self:resolve_book_id_by_title(document, callback)
+        self:resolve_book_id_by_info(info, callback)
     end
 end
 
--- Fallback: resolve book_id by title search
-function Manager:resolve_book_id_by_title(document, callback)
-    local docsettings = document.docsettings
-    local file_name = utils.get_file_basename(document.file)
-    local title = file_name:gsub("%.%w+$", "")
+-- Fallback: resolve book_id by title search using doc info
+function Manager:resolve_book_id_by_info(info, callback)
+    local title = info.title
 
     logger.info("FolioSync Manager: resolving book_id by title " .. title)
     self.api:list_books(1, 10, title, function(success, response)
@@ -107,8 +247,8 @@ function Manager:resolve_book_id_by_title(document, callback)
             local book_id = matched_book.id
             logger.info("FolioSync Manager: matched " .. title .. " to Folio book_id " .. tostring(book_id))
 
-            if docsettings then
-                docsettings:saveSetting("folio_book_id", book_id)
+            if info.docsettings and info.docsettings.saveSetting then
+                info.docsettings:saveSetting("folio_book_id", book_id)
             end
             if callback then callback(book_id) end
         else
@@ -118,14 +258,21 @@ function Manager:resolve_book_id_by_title(document, callback)
     end)
 end
 
-
 -- Synchronize reading progress for current document
 function Manager:sync_progress(ui, document, is_silent)
     if not self.api:has_auth() then
         return
     end
 
-    self:resolve_book_id(document, function(book_id)
+    local info = self:get_doc_info(ui, document)
+    if not info then
+        if not is_silent then
+            utils.show_msg(_("No active document open."))
+        end
+        return
+    end
+
+    self:resolve_book_id(ui, document, function(book_id)
         if not book_id then
             if not is_silent then
                 utils.show_msg(_("Document not matched on Folio server."))
@@ -133,18 +280,16 @@ function Manager:sync_progress(ui, document, is_silent)
             return
         end
 
-        -- Get current local progress from KOReader
-        local current_page = ui.link:getPage()
-        local total_pages = ui.document:getPageCount()
-        local percent = total_pages > 0 and ((current_page / total_pages) * 100) or 0
-        local location = ui.link:calcCFI() or string.format("page_%d", current_page)
+        local current_page = info.current_page
+        local total_pages = info.total_pages
+        local percent = info.percent
+        local location = info.location
 
         -- Fetch remote progress first
         self.api:get_progress(book_id, function(success, remote_data)
             local should_push = true
             if success and remote_data and remote_data.progressPercent then
                 local remote_percent = remote_data.progressPercent or 0
-                -- If remote progress is ahead, offer to jump
                 if remote_percent > percent and not is_silent then
                     logger.info(string.format("FolioSync: remote progress (%d%%) ahead of local (%d%%)", remote_percent, percent))
                 end
@@ -170,7 +315,15 @@ function Manager:sync_annotations(ui, document, force_manual)
         return
     end
 
-    self:resolve_book_id(document, function(book_id)
+    local info = self:get_doc_info(ui, document)
+    if not info then
+        if force_manual then
+            utils.show_msg(_("No active document open."))
+        end
+        return
+    end
+
+    self:resolve_book_id(ui, document, function(book_id)
         if not book_id then
             if force_manual then
                 utils.show_msg(_("Book not found in Folio library."))
@@ -192,8 +345,8 @@ function Manager:sync_annotations(ui, document, force_manual)
             end
 
             -- 2. Read local bookmarks/annotations from KOReader docsettings
-            local docsettings = document.docsettings
-            local local_bookmarks = docsettings and docsettings:readSetting("bookmark") or {}
+            local docsettings = info.docsettings
+            local local_bookmarks = docsettings and docsettings.readSetting and docsettings:readSetting("bookmark") or {}
 
             local remote_map = {}
             for _, r_item in ipairs(remote_annos) do
@@ -233,14 +386,15 @@ function Manager:push_all_data(ui, document, force_manual)
         return
     end
 
-    if not document or not document.file then
+    local info = self:get_doc_info(ui, document)
+    if not info then
         if force_manual then
             utils.show_msg(_("No active document open."))
         end
         return
     end
 
-    self:resolve_book_id(document, function(book_id)
+    self:resolve_book_id(ui, document, function(book_id)
         if not book_id then
             if force_manual then
                 utils.show_msg(_("Document not matched on Folio server."))
@@ -252,10 +406,8 @@ function Manager:push_all_data(ui, document, force_manual)
             utils.show_msg(_("Pushing all document data to Folio..."))
         end
 
-        local current_page = ui.link and ui.link:getPage() or 1
-        local total_pages = ui.document and ui.document:getPageCount() or 1
-        local percent = total_pages > 0 and ((current_page / total_pages) * 100) or 0
-        local location = (ui.link and ui.link:calcCFI()) or string.format("page_%d", current_page)
+        local percent = info.percent
+        local location = info.location
 
         self.api:update_progress(book_id, location, percent, function(push_prog_ok)
             self:sync_annotations(ui, document, false)
@@ -280,14 +432,15 @@ function Manager:pull_all_data(ui, document, force_manual)
         return
     end
 
-    if not document or not document.file then
+    local info = self:get_doc_info(ui, document)
+    if not info then
         if force_manual then
             utils.show_msg(_("No active document open."))
         end
         return
     end
 
-    self:resolve_book_id(document, function(book_id)
+    self:resolve_book_id(ui, document, function(book_id)
         if not book_id then
             if force_manual then
                 utils.show_msg(_("Document not matched on Folio server."))
@@ -304,15 +457,13 @@ function Manager:pull_all_data(ui, document, force_manual)
             if prog_ok and remote_data then
                 local remote_pos = remote_data.location
                 local remote_percent = remote_data.progressPercent or remote_data.progress_percent
-                if remote_pos and remote_pos ~= "" then
-                    ui:handleEvent(Event:new("GotoXPointer", remote_pos))
-                elseif remote_percent and ui.document then
-                    local total_pages = ui.document:getPageCount()
-                    if total_pages and total_pages > 0 then
-                        local target_page = math.max(1, math.min(total_pages, math.floor((remote_percent / 100) * total_pages)))
-                        if ui.link and ui.link.goToPage then
-                            ui.link:goToPage(target_page)
-                        end
+                local target_ui = info.ui or ui or self.ui
+                if remote_pos and remote_pos ~= "" and target_ui and target_ui.handleEvent then
+                    target_ui:handleEvent(Event:new("GotoXPointer", remote_pos))
+                elseif remote_percent and info.total_pages > 0 then
+                    local target_page = math.max(1, math.min(info.total_pages, math.floor((remote_percent / 100) * info.total_pages)))
+                    if target_ui and target_ui.link and target_ui.link.goToPage then
+                        target_ui.link:goToPage(target_page)
                     end
                 end
                 if remote_percent then
@@ -322,9 +473,9 @@ function Manager:pull_all_data(ui, document, force_manual)
 
             self.api:list_annotations(book_id, function(anno_ok, remote_annos)
                 local added_count = 0
-                if anno_ok and remote_annos then
-                    local docsettings = document.docsettings
-                    local local_bookmarks = docsettings and docsettings:readSetting("bookmark") or {}
+                local docsettings = info.docsettings
+                if anno_ok and remote_annos and docsettings and docsettings.readSetting then
+                    local local_bookmarks = docsettings:readSetting("bookmark") or {}
 
                     for _, r_item in ipairs(remote_annos) do
                         local converted = annotations_helper.folio_to_koreader_annotation(r_item)
@@ -341,7 +492,7 @@ function Manager:pull_all_data(ui, document, force_manual)
                         end
                     end
 
-                    if added_count > 0 and docsettings then
+                    if added_count > 0 and docsettings.saveSetting then
                         docsettings:saveSetting("bookmark", local_bookmarks)
                     end
                 end

@@ -54,11 +54,26 @@ function FolioSync:addToMainMenu(menu_items)
     menu_items.folio_sync = self.menus:get_menu_structure()
 end
 
-function FolioSync:onReaderReady(ui)
+function FolioSync:onReaderAppReady(ui)
     self.ui = ui
     self.manager.ui = ui
     self.browser.ui = ui
     self:onDispatcherRegisterActions()
+end
+
+function FolioSync:onReaderReady(ui)
+    self:onReaderAppReady(ui)
+end
+
+function FolioSync:get_ui()
+    if self.ui and self.ui.document then
+        return self.ui
+    end
+    local UIManager = require("ui/uimanager")
+    if UIManager._window and UIManager._window.ui and UIManager._window.ui.document then
+        return UIManager._window.ui
+    end
+    return self.ui
 end
 
 function FolioSync:load_settings()
@@ -121,30 +136,18 @@ function FolioSync:onFolioSyncBrowse()
 end
 
 function FolioSync:onFolioSyncPushDoc()
-    if self.ui and self.ui.document then
-        self.manager:push_all_data(self.ui, self.ui.document, true)
-    else
-        utils.show_msg(_("No active document open."))
-    end
+    self.manager:push_all_data(self.ui, nil, true)
     return true
 end
 
 function FolioSync:onFolioSyncPullDoc()
-    if self.ui and self.ui.document then
-        self.manager:pull_all_data(self.ui, self.ui.document, true)
-    else
-        utils.show_msg(_("No active document open."))
-    end
+    self.manager:pull_all_data(self.ui, nil, true)
     return true
 end
 
 function FolioSync:onFolioSyncCurrentDoc()
-    if self.ui and self.ui.document then
-        self.manager:pull_all_data(self.ui, self.ui.document, false)
-        self.manager:push_all_data(self.ui, self.ui.document, true)
-    else
-        utils.show_msg(_("No active document open."))
-    end
+    self.manager:pull_all_data(self.ui, nil, false)
+    self.manager:push_all_data(self.ui, nil, true)
     return true
 end
 
