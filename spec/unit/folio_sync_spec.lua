@@ -17,7 +17,7 @@ describe("FolioSync Annotation Conversion", function()
         local folio_item = annotations.koreader_to_folio_annotation(kr_item)
 
         assert.is_not_nil(folio_item)
-        assert.is_equal("/6/4[chapter1]!/4/2/1:0-/6/4[chapter1]!/4/2/1:50", folio_item.cfiRange)
+        assert.is_equal("/6/4[chapter1]!/4/2/1:0-/6/4[chapter1]!/4/2/1:50", folio_item.locationStart)
         assert.is_equal("Highlighted text quote", folio_item.selectedText)
         assert.is_equal("My user note", folio_item.note)
         assert.is_equal("yellow", folio_item.color)
@@ -26,7 +26,7 @@ describe("FolioSync Annotation Conversion", function()
     it("converts Folio REST annotation response item to KOReader bookmark format", function()
         local folio_item = {
             id = "12345678-1234-1234-1234-123456789abc",
-            cfiRange = "epubcfi(/6/4!/4/2/1:0)",
+            locationStart = "epubcfi(/6/4!/4/2/1:0)",
             selectedText = "Sample quote from ebook",
             note = "Important reflection",
             color = "blue",

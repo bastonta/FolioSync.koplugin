@@ -2,6 +2,7 @@ local _ = require("gettext")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local T = require("ffi/util").template
+local Event = require("ui/event")
 local logger = require("logger")
 local annotations_helper = require("annotations")
 local utils = require("utils")
@@ -136,7 +137,7 @@ function Manager:sync_progress(ui, document, is_silent)
         local current_page = ui.link:getPage()
         local total_pages = ui.document:getPageCount()
         local percent = total_pages > 0 and ((current_page / total_pages) * 100) or 0
-        local cfi = ui.link:calcCFI() or string.format("page_%d", current_page)
+        local location = ui.link:calcCFI() or string.format("page_%d", current_page)
 
         -- Fetch remote progress first
         self.api:get_progress(book_id, function(success, remote_data)
@@ -150,7 +151,7 @@ function Manager:sync_progress(ui, document, is_silent)
             end
 
             if should_push then
-                self.api:update_progress(book_id, cfi, percent, function(push_ok)
+                self.api:update_progress(book_id, location, percent, function(push_ok)
                     if push_ok and not is_silent then
                         utils.show_msg(T(_("Progress synced to Folio (%1%%)"), math.floor(percent)))
                     end
@@ -254,9 +255,9 @@ function Manager:push_all_data(ui, document, force_manual)
         local current_page = ui.link and ui.link:getPage() or 1
         local total_pages = ui.document and ui.document:getPageCount() or 1
         local percent = total_pages > 0 and ((current_page / total_pages) * 100) or 0
-        local cfi = (ui.link and ui.link:calcCFI()) or string.format("page_%d", current_page)
+        local location = (ui.link and ui.link:calcCFI()) or string.format("page_%d", current_page)
 
-        self.api:update_progress(book_id, cfi, percent, function(push_prog_ok)
+        self.api:update_progress(book_id, location, percent, function(push_prog_ok)
             self:sync_annotations(ui, document, false)
             if force_manual then
                 if push_prog_ok then
@@ -301,10 +302,10 @@ function Manager:pull_all_data(ui, document, force_manual)
         self.api:get_progress(book_id, function(prog_ok, remote_data)
             local progress_msg = ""
             if prog_ok and remote_data then
-                local remote_cfi = remote_data.cfi or remote_data.cfiRange
+                local remote_pos = remote_data.location
                 local remote_percent = remote_data.progressPercent or remote_data.progress_percent
-                if remote_cfi and remote_cfi ~= "" and ui.link and ui.link.onGoToCFI then
-                    ui.link:onGoToCFI(remote_cfi)
+                if remote_pos and remote_pos ~= "" then
+                    ui:handleEvent(Event:new("GotoXPointer", remote_pos))
                 elseif remote_percent and ui.document then
                     local total_pages = ui.document:getPageCount()
                     if total_pages and total_pages > 0 then

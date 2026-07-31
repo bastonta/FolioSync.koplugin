@@ -279,7 +279,7 @@ end
 
 function FolioAPI:get_progress(book_id, callback)
     local base_url = self:get_server_url()
-    local url = base_url .. "/books/" .. tostring(book_id) .. "/progress"
+    local url = base_url .. "/books/" .. tostring(book_id) .. "/progress?format=xpointer"
 
     local http = get_http_client()
     if not http then
@@ -313,7 +313,7 @@ function FolioAPI:update_progress(book_id, cfi, progress_percent, callback)
     local url = base_url .. "/books/" .. tostring(book_id) .. "/progress"
 
     local payload = json.encode({
-        cfi = cfi or "",
+        location = cfi or "",
         progressPercent = progress_percent or 0.0,
     })
 
@@ -341,7 +341,7 @@ end
 
 function FolioAPI:list_annotations(book_id, callback)
     local base_url = self:get_server_url()
-    local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations"
+    local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations?format=xpointer"
 
     local http = get_http_client()
     if not http then
@@ -375,7 +375,8 @@ function FolioAPI:create_annotation(book_id, annotation, callback)
     local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations"
 
     local payload = json.encode({
-        cfiRange = annotation.cfi_range or annotation.cfiRange or "",
+        locationStart = annotation.locationStart or "",
+        locationEnd = annotation.locationEnd or "",
         selectedText = annotation.selected_text or annotation.selectedText or "",
         note = annotation.note,
         color = annotation.color,
@@ -413,7 +414,8 @@ function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback
     local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id)
 
     local payload = json.encode({
-        cfiRange = annotation.cfi_range or annotation.cfiRange or "",
+        locationStart = annotation.locationStart or "",
+        locationEnd = annotation.locationEnd or "",
         selectedText = annotation.selected_text or annotation.selectedText or "",
         note = annotation.note,
         color = annotation.color,
@@ -469,7 +471,7 @@ end
 
 function FolioAPI:list_bookmarks(book_id, callback)
     local base_url = self:get_server_url()
-    local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks"
+    local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks?format=xpointer"
 
     local http = get_http_client()
     if not http then
@@ -503,7 +505,7 @@ function FolioAPI:create_bookmark(book_id, bookmark, callback)
     local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks"
 
     local payload = json.encode({
-        cfi = bookmark.cfi or "",
+        location = bookmark.location or bookmark.cfi or "",
         title = bookmark.title or "Bookmark",
     })
 
