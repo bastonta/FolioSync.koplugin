@@ -54,15 +54,12 @@ function FolioSync:addToMainMenu(menu_items)
     menu_items.folio_sync = self.menus:get_menu_structure()
 end
 
-function FolioSync:onReaderAppReady(ui)
-    self.ui = ui
-    self.manager.ui = ui
-    self.browser.ui = ui
+function FolioSync:onReaderReady()
+    -- self.ui is already set by KOReader's WidgetContainer system before init()
+    -- ReaderReady event has no arguments, so we must NOT overwrite self.ui
+    self.manager.ui = self.ui
+    self.browser.ui = self.ui
     self:onDispatcherRegisterActions()
-end
-
-function FolioSync:onReaderReady(ui)
-    self:onReaderAppReady(ui)
 end
 
 function FolioSync:get_ui()

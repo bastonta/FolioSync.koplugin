@@ -424,14 +424,34 @@ end
 
 -- Navigate reader UI to position/page specified by location or percentage
 function Manager:goto_location(target_ui, remote_pos, remote_percent, total_pages, target_doc)
-    if not target_ui then
-        logger.warn("FolioSync Manager: cannot jump - target_ui is nil")
-        return false
+    -- Resolve UI: find a real ReaderUI widget with handleEvent
+    local ui = nil
+    if self.plugin and self.plugin.ui and self.plugin.ui.handleEvent then
+        ui = self.plugin.ui
+    elseif self.plugin and self.plugin.get_ui then
+        local got = self.plugin:get_ui()
+        if got and got.handleEvent then ui = got end
+    elseif target_ui and target_ui.handleEvent then
+        ui = target_ui
+    elseif self.ui and self.ui.handleEvent then
+        ui = self.ui
+    end
+
+    if not ui then
+        logger.warn("FolioSync Manager: cannot jump - no valid UI with handleEvent found")
     end
 
     logger.info(string.format("FolioSync Manager: restoring position (location=%s, percent=%s)", tostring(remote_pos), tostring(remote_percent)))
 
-    local doc = target_doc or (target_ui and target_ui.document)
+    local doc = target_doc or (ui and ui.document)
+
+    -- Resolve total_pages if missing or 1
+    if (not total_pages or total_pages <= 1) and doc and doc.getPageCount then
+        local ok, count = pcall(function() return doc:getPageCount() end)
+        if ok and count and count > 1 then
+            total_pages = count
+        end
+    end
 
     -- 1. If location is provided (XPointer or page string)
     if remote_pos and remote_pos ~= "" then
@@ -441,12 +461,8 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
             local page = tonumber(page_num)
             if page and page > 0 then
                 logger.info("FolioSync Manager: jumping to page " .. tostring(page))
-                if target_ui.link and target_ui.link.goToPage then
-                    target_ui.link:goToPage(page)
-                elseif target_ui.gotoPage then
-                    target_ui:gotoPage(page)
-                elseif target_ui.handleEvent then
-                    target_ui:handleEvent(Event:new("GotoPage", page))
+                if ui then
+                    ui:handleEvent(Event:new("GotoPage", page))
                 end
                 return true
             end
@@ -457,66 +473,37 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
             local ok, page = pcall(function() return doc:getPageFromXPointer(remote_pos) end)
             if ok and page and page > 0 then
                 logger.info("FolioSync Manager: resolved XPointer to page " .. tostring(page))
-                if target_ui.link and target_ui.link.goToPage then
-                    target_ui.link:goToPage(page)
-                    return true
-                elseif target_ui.gotoPage then
-                    target_ui:gotoPage(page)
-                    return true
-                elseif target_ui.handleEvent then
-                    target_ui:handleEvent(Event:new("GotoPage", page))
-                    return true
+                if ui then
+                    ui:handleEvent(Event:new("GotoPage", page))
                 end
+                return true
             end
         end
 
-        -- C. Dispatch GotoLocation event (standard KOReader event for XPointers/locations)
-        local jumped = false
-        if target_ui.handleEvent then
-            local res = target_ui:handleEvent(Event:new("GotoLocation", remote_pos))
-            if res ~= false then
-                jumped = true
-                logger.info("FolioSync Manager: dispatched GotoLocation event for " .. tostring(remote_pos))
-            end
-        end
-
-        -- D. Direct view gotoLocation fallback if handleEvent didn't handle it
-        if not jumped and target_ui.view and target_ui.view.gotoLocation then
-            local ok = pcall(function() target_ui.view:gotoLocation(remote_pos) end)
+        -- C. For valid XPointer (without wildcard `*` syntax): try ReaderLink:onGotoLink
+        if ui and ui.link and not remote_pos:find("/%*") then
+            logger.info("FolioSync Manager: navigating via link:onGotoLink xpointer: " .. tostring(remote_pos))
+            local ok = pcall(function() ui.link:onGotoLink({ xpointer = remote_pos }) end)
             if ok then
-                jumped = true
-                logger.info("FolioSync Manager: jumped via view:gotoLocation: " .. tostring(remote_pos))
+                return true
             end
-        end
-
-        -- E. Direct ui gotoLocation fallback
-        if not jumped and target_ui.gotoLocation then
-            local ok = pcall(function() target_ui:gotoLocation(remote_pos) end)
-            if ok then
-                jumped = true
-                logger.info("FolioSync Manager: jumped via ui:gotoLocation: " .. tostring(remote_pos))
-            end
-        end
-
-        if jumped then
-            return true
+        else
+            logger.info("FolioSync Manager: XPointer contains wildcards or cannot be resolved directly, using percentage fallback: " .. tostring(remote_pos))
         end
     end
 
     -- 2. Fallback: try restoring by progress percentage if total_pages is known
     if remote_percent and total_pages and total_pages > 0 then
-        local target_page = math.max(1, math.min(total_pages, math.floor((remote_percent / 100) * total_pages + 0.5)))
-        logger.info("FolioSync Manager: jumping to page " .. tostring(target_page) .. " via percentage fallback (" .. tostring(remote_percent) .. "%)")
-        if target_ui.link and target_ui.link.goToPage then
-            target_ui.link:goToPage(target_page)
-            return true
-        elseif target_ui.gotoPage then
-            target_ui:gotoPage(target_page)
-            return true
-        elseif target_ui.handleEvent then
-            target_ui:handleEvent(Event:new("GotoPage", target_page))
-            return true
+        local pct = remote_percent
+        if pct <= 1 and pct > 0 then
+            pct = pct * 100
         end
+        local target_page = math.max(1, math.min(total_pages, math.floor((pct / 100) * total_pages + 0.5)))
+        logger.info("FolioSync Manager: jumping to page " .. tostring(target_page) .. " via percentage fallback (" .. tostring(remote_percent) .. "%)")
+        if ui then
+            ui:handleEvent(Event:new("GotoPage", target_page))
+        end
+        return true
     end
 
     logger.warn("FolioSync Manager: could not navigate to remote location/page")
