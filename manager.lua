@@ -345,18 +345,19 @@ function Manager:sync_annotations(ui, document, force_manual)
                 return
             end
 
-            -- 2. Read local bookmarks/annotations from KOReader docsettings
+            -- 2. Read local annotations from KOReader docsettings
             local docsettings = info.docsettings
-            local local_bookmarks = docsettings and docsettings.readSetting and docsettings:readSetting("bookmark") or {}
+            local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
+            local target_doc = info.document or (target_ui and target_ui.document) or document
+            local local_annos = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
 
-            local remote_map = {}
-            for _, r_item in ipairs(remote_annos) do
-                local converted = annotations_helper.folio_to_koreader_annotation(r_item)
-                table.insert(remote_map, converted)
+            -- Sanitize pre-existing local annotations
+            for _, l_item in ipairs(local_annos) do
+                annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
             end
 
             -- 3. Merge: Push local items that are missing on remote
-            for _, l_item in ipairs(local_bookmarks) do
+            for _, l_item in ipairs(local_annos) do
                 local found = false
                 for _, r_item in ipairs(remote_annos) do
                     if annotations_helper.is_same_annotation(l_item, r_item) then
@@ -366,7 +367,9 @@ function Manager:sync_annotations(ui, document, force_manual)
                 end
                 if not found then
                     local folio_annot = annotations_helper.koreader_to_folio_annotation(l_item)
-                    self.api:create_annotation(book_id, folio_annot)
+                    if folio_annot then
+                        self.api:create_annotation(book_id, folio_annot)
+                    end
                 end
             end
 
@@ -377,7 +380,44 @@ function Manager:sync_annotations(ui, document, force_manual)
     end)
 end
 
--- Push all data (progress + annotations) for current document to Folio
+-- Synchronize bookmarks (page dog-ears) for current document
+function Manager:sync_bookmarks(ui, document, force_manual)
+    if not self.api:has_auth() then return end
+
+    local info = self:get_doc_info(ui, document)
+    if not info then return end
+
+    self:resolve_book_id(ui, document, function(book_id)
+        if not book_id then return end
+
+        self.api:list_bookmarks(book_id, function(success, remote_bms)
+            if not success or not remote_bms then return end
+
+            local docsettings = info.docsettings
+            local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
+            local target_doc = info.document or (target_ui and target_ui.document) or document
+            local local_bms = docsettings and docsettings.readSetting and docsettings:readSetting("bookmark") or {}
+
+            for _, l_bm in ipairs(local_bms) do
+                local found = false
+                for _, r_bm in ipairs(remote_bms) do
+                    if annotations_helper.is_same_annotation(l_bm, r_bm) then
+                        found = true
+                        break
+                    end
+                end
+                if not found then
+                    local folio_bm = annotations_helper.koreader_to_folio_bookmark(l_bm)
+                    if folio_bm then
+                        self.api:create_bookmark(book_id, folio_bm)
+                    end
+                end
+            end
+        end)
+    end)
+end
+
+-- Push all data (progress + annotations + bookmarks) for current document to Folio
 function Manager:push_all_data(ui, document, force_manual)
     if force_manual == nil then force_manual = true end
     if not self.api:has_auth() then
@@ -412,6 +452,7 @@ function Manager:push_all_data(ui, document, force_manual)
 
         self.api:update_progress(book_id, location, percent, function(push_prog_ok)
             self:sync_annotations(ui, document, false)
+            self:sync_bookmarks(ui, document, false)
             if force_manual then
                 if push_prog_ok then
                     utils.show_msg(T(_("All document data sent to Folio (%1%%)!"), math.floor(percent)))
@@ -438,72 +479,53 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
         ui = self.ui
     end
 
-    if not ui then
-        logger.warn("FolioSync Manager: cannot jump - no valid UI with handleEvent found")
+    if not remote_pos or remote_pos == "" then
+        if remote_percent and total_pages and total_pages > 1 then
+            local pct = tonumber(remote_percent) or 0
+            if pct <= 1 then pct = pct * 100 end
+            local target_page = math.max(1, math.min(total_pages, math.floor((pct / 100) * total_pages + 0.5)))
+            if ui then ui:handleEvent(Event:new("GotoPage", target_page)) end
+            return true
+        end
+        return false
     end
-
-    logger.info(string.format("FolioSync Manager: restoring position (location=%s, percent=%s)", tostring(remote_pos), tostring(remote_percent)))
 
     local doc = target_doc or (ui and ui.document)
 
-    -- Resolve total_pages if missing or 1
-    if (not total_pages or total_pages <= 1) and doc and doc.getPageCount then
-        local ok, count = pcall(function() return doc:getPageCount() end)
-        if ok and count and count > 1 then
-            total_pages = count
+    -- A. Check if remote_pos is a page_N string
+    local target_page = remote_pos:match("^page_(%d+)$")
+    if target_page then
+        target_page = tonumber(target_page)
+        logger.info("FolioSync Manager: restoring position page " .. tostring(target_page))
+        if ui then ui:handleEvent(Event:new("GotoPage", target_page)) end
+        return true
+    end
+
+    -- B. Try resolving XPointer to page via document:getPageFromXPointer
+    if doc and doc.getPageFromXPointer then
+        local ok, page_num = pcall(function() return doc:getPageFromXPointer(remote_pos) end)
+        if ok and page_num and tonumber(page_num) and tonumber(page_num) > 0 then
+            target_page = tonumber(page_num)
+            logger.info("FolioSync Manager: resolved XPointer to page " .. tostring(target_page))
+            if ui then ui:handleEvent(Event:new("GotoPage", target_page)) end
+            return true
         end
     end
 
-    -- 1. If location is provided (XPointer or page string)
-    if remote_pos and remote_pos ~= "" then
-        -- A. Check if remote_pos is a page identifier like "page_15" or numeric string "15"
-        local page_num = remote_pos:match("^page_(%d+)$") or remote_pos:match("^(%d+)$")
-        if page_num then
-            local page = tonumber(page_num)
-            if page and page > 0 then
-                logger.info("FolioSync Manager: jumping to page " .. tostring(page))
-                if ui then
-                    ui:handleEvent(Event:new("GotoPage", page))
-                end
-                return true
-            end
-        end
-
-        -- B. Try resolving XPointer to page via document:getPageFromXPointer
-        if doc and doc.getPageFromXPointer then
-            local ok, page = pcall(function() return doc:getPageFromXPointer(remote_pos) end)
-            if ok and page and page > 0 then
-                logger.info("FolioSync Manager: resolved XPointer to page " .. tostring(page))
-                if ui then
-                    ui:handleEvent(Event:new("GotoPage", page))
-                end
-                return true
-            end
-        end
-
-        -- C. For valid XPointer (without wildcard `*` syntax): try ReaderLink:onGotoLink
-        if ui and ui.link and not remote_pos:find("/%*") then
-            logger.info("FolioSync Manager: navigating via link:onGotoLink xpointer: " .. tostring(remote_pos))
-            local ok = pcall(function() ui.link:onGotoLink({ xpointer = remote_pos }) end)
-            if ok then
-                return true
-            end
-        else
-            logger.info("FolioSync Manager: XPointer contains wildcards or cannot be resolved directly, using percentage fallback: " .. tostring(remote_pos))
-        end
+    -- C. Try direct XPointer link jump
+    if ui and ui.link and ui.link.onGotoLink then
+        logger.info("FolioSync Manager: jumping to XPointer " .. tostring(remote_pos))
+        local ok = pcall(function() ui.link:onGotoLink({ xpointer = remote_pos }) end)
+        if ok then return true end
     end
 
-    -- 2. Fallback: try restoring by progress percentage if total_pages is known
-    if remote_percent and total_pages and total_pages > 0 then
-        local pct = remote_percent
-        if pct <= 1 and pct > 0 then
-            pct = pct * 100
-        end
+    -- D. Fallback: percentage
+    if remote_percent and total_pages and total_pages > 1 then
+        local pct = tonumber(remote_percent) or 0
+        if pct <= 1 then pct = pct * 100 end
         local target_page = math.max(1, math.min(total_pages, math.floor((pct / 100) * total_pages + 0.5)))
         logger.info("FolioSync Manager: jumping to page " .. tostring(target_page) .. " via percentage fallback (" .. tostring(remote_percent) .. "%)")
-        if ui then
-            ui:handleEvent(Event:new("GotoPage", target_page))
-        end
+        if ui then ui:handleEvent(Event:new("GotoPage", target_page)) end
         return true
     end
 
@@ -511,7 +533,7 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
     return false
 end
 
--- Fetch/pull all data (progress + annotations) for current document from Folio
+-- Fetch/pull all data (progress + annotations + bookmarks) for current document from Folio
 function Manager:pull_all_data(ui, document, force_manual)
     if force_manual == nil then force_manual = true end
     if not self.api:has_auth() then
@@ -553,75 +575,113 @@ function Manager:pull_all_data(ui, document, force_manual)
 
                 if remote_percent then
                     progress_msg = T(_("Progress: %1%%"), math.floor(remote_percent))
-                elseif target_page then
-                    progress_msg = T(_("Page %1"), target_page)
                 end
             end
 
+            -- 1. Pull Annotations
             self.api:list_annotations(book_id, function(anno_ok, remote_annos)
                 local added_count = 0
                 local docsettings = info.docsettings
+                local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
+                local target_doc = info.document or (target_ui and target_ui.document) or document
+
                 if anno_ok and remote_annos and docsettings and docsettings.readSetting then
-                    local local_bookmarks = docsettings:readSetting("bookmark") or {}
+                    local local_annos = docsettings:readSetting("annotations") or (target_ui and target_ui.annotation and target_ui.annotation.annotations) or {}
+
+                    for _, l_item in ipairs(local_annos) do
+                        annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
+                    end
 
                     for _, r_item in ipairs(remote_annos) do
-                        local converted = annotations_helper.folio_to_koreader_annotation(r_item)
-                        local found = false
-                        for _, l_item in ipairs(local_bookmarks) do
+                        local converted = annotations_helper.folio_to_koreader_annotation(r_item, target_doc)
+                        local found_l_item = nil
+                        for _, l_item in ipairs(local_annos) do
                             if annotations_helper.is_same_annotation(l_item, r_item) or annotations_helper.is_same_annotation(l_item, converted) then
-                                found = true
+                                found_l_item = l_item
                                 break
                             end
                         end
-                        if not found then
-                            table.insert(local_bookmarks, converted)
+                        if found_l_item then
+                            found_l_item.folio_id = r_item.id or found_l_item.folio_id
+                            if converted then
+                                found_l_item.note = converted.note or found_l_item.note
+                                found_l_item.color = converted.color or found_l_item.color
+                                found_l_item.datetime_updated = converted.datetime_updated or found_l_item.datetime_updated
+                            end
+                            annotations_helper.sanitize_koreader_annotation(found_l_item, target_doc)
+                        elseif converted then
+                            table.insert(local_annos, converted)
                             added_count = added_count + 1
                         end
                     end
 
-                    if added_count > 0 and docsettings.saveSetting then
-                        docsettings:saveSetting("bookmark", local_bookmarks)
-                        docsettings:saveSetting("annotations", local_bookmarks)
+                    if (added_count > 0 or #local_annos > 0) and docsettings.saveSetting then
+                        docsettings:saveSetting("annotations", local_annos)
 
-                        -- Update in-memory active KOReader UI widgets if open
-                        if ui then
-                            if ui.bookmark then
-                                ui.bookmark.bookmark = local_bookmarks
-                                if ui.bookmark.onSaveSettings then
-                                    ui.bookmark:onSaveSettings()
-                                end
+                        if target_ui and target_ui.annotation then
+                            target_ui.annotation.annotations = local_annos
+                            if target_ui.annotation.onSaveSettings then
+                                target_ui.annotation:onSaveSettings()
                             end
-                            if ui.annotation then
-                                ui.annotation.annotations = local_bookmarks
-                                if ui.annotation.onSaveSettings then
-                                    ui.annotation:onSaveSettings()
-                                end
-                            end
+                        end
 
-                            -- Broadcast events to notify KOReader UI components
-                            UIManager:broadcastEvent(Event:new("AnnotationsModified", local_bookmarks))
-                            UIManager:broadcastEvent(Event:new("BookmarksModified", local_bookmarks))
+                        UIManager:broadcastEvent(Event:new("AnnotationsModified", local_annos))
 
-                            -- Redraw view so highlights and annotations display immediately
-                            if not document.is_pdf then
-                                if document.render then document:render() end
-                                if ui.view and ui.view.recalculate then ui.view:recalculate() end
-                                if ui.view and ui.view.dialog then UIManager:setDirty(ui.view.dialog, "partial") end
+                        if target_doc then
+                            if not target_doc.is_pdf then
+                                if target_doc.render then target_doc:render() end
+                                if target_ui and target_ui.view and target_ui.view.recalculate then target_ui.view:recalculate() end
+                                if target_ui and target_ui.view and target_ui.view.dialog then UIManager:setDirty(target_ui.view.dialog, "partial") end
                             else
-                                if document.resetTileCacheValidity then document:resetTileCacheValidity() end
-                                if ui.view and ui.view.dialog then UIManager:setDirty(ui.view.dialog, "ui") end
+                                if target_doc.resetTileCacheValidity then target_doc:resetTileCacheValidity() end
+                                if target_ui and target_ui.view and target_ui.view.dialog then UIManager:setDirty(target_ui.view.dialog, "ui") end
                             end
                         end
                     end
                 end
 
-                if force_manual then
-                    if added_count > 0 then
-                        utils.show_msg(T(_("Fetched remote data: %1 (%2 new annotations)"), progress_msg ~= "" and progress_msg or _("Progress updated"), added_count))
-                    else
-                        utils.show_msg(T(_("Fetched remote data: %1"), progress_msg ~= "" and progress_msg or _("Up to date")))
+                -- 2. Pull Bookmarks
+                self.api:list_bookmarks(book_id, function(bm_ok, remote_bms)
+                    local bm_added = 0
+                    if bm_ok and remote_bms and docsettings and docsettings.readSetting then
+                        local local_bms = docsettings:readSetting("bookmark") or (target_ui and target_ui.bookmark and target_ui.bookmark.bookmark) or {}
+
+                        for _, r_bm in ipairs(remote_bms) do
+                            local converted_bm = annotations_helper.folio_to_koreader_bookmark(r_bm, target_doc)
+                            local found = false
+                            for _, l_bm in ipairs(local_bms) do
+                                if annotations_helper.is_same_annotation(l_bm, r_bm) or annotations_helper.is_same_annotation(l_bm, converted_bm) then
+                                    found = true
+                                    break
+                                end
+                            end
+                            if not found and converted_bm then
+                                table.insert(local_bms, converted_bm)
+                                bm_added = bm_added + 1
+                            end
+                        end
+
+                        if (bm_added > 0 or #local_bms > 0) and docsettings.saveSetting then
+                            docsettings:saveSetting("bookmark", local_bms)
+                            if target_ui and target_ui.bookmark then
+                                target_ui.bookmark.bookmark = local_bms
+                                if target_ui.bookmark.onSaveSettings then
+                                    target_ui.bookmark:onSaveSettings()
+                                end
+                            end
+                            UIManager:broadcastEvent(Event:new("BookmarksModified", local_bms))
+                        end
                     end
-                end
+
+                    if force_manual then
+                        local total_added = added_count + bm_added
+                        if total_added > 0 then
+                            utils.show_msg(T(_("Fetched remote data: %1 (%2 new items)"), progress_msg ~= "" and progress_msg or _("Progress updated"), total_added))
+                        else
+                            utils.show_msg(T(_("Fetched remote data: %1"), progress_msg ~= "" and progress_msg or _("Up to date")))
+                        end
+                    end
+                end)
             end)
         end)
     end)
