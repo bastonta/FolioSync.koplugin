@@ -136,18 +136,18 @@ function FolioSync:onFolioSyncBrowse()
 end
 
 function FolioSync:onFolioSyncPushDoc()
-    self.manager:push_all_data(self.ui, nil, true)
+    self.manager:push_all_data(self:get_ui(), nil, true)
     return true
 end
 
 function FolioSync:onFolioSyncPullDoc()
-    self.manager:pull_all_data(self.ui, nil, true)
+    self.manager:pull_all_data(self:get_ui(), nil, true)
     return true
 end
 
 function FolioSync:onFolioSyncCurrentDoc()
-    self.manager:pull_all_data(self.ui, nil, false)
-    self.manager:push_all_data(self.ui, nil, true)
+    self.manager:pull_all_data(self:get_ui(), nil, false)
+    self.manager:push_all_data(self:get_ui(), nil, true)
     return true
 end
 

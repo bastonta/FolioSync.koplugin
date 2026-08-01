@@ -32,19 +32,19 @@ function Menus:get_menu_structure()
             {
                 text = _("📤 Push All Data of Active Document"),
                 callback = function()
-                    self.plugin.manager:push_all_data(self.plugin.ui, nil, true)
+                    self.plugin.manager:push_all_data(self.plugin:get_ui(), nil, true)
                 end,
             },
             {
                 text = _("📥 Fetch All Data of Active Document"),
                 callback = function()
-                    self.plugin.manager:pull_all_data(self.plugin.ui, nil, true)
+                    self.plugin.manager:pull_all_data(self.plugin:get_ui(), nil, true)
                 end,
             },
             {
                 text = _("🔄 Sync Active Document Annotations"),
                 callback = function()
-                    self.plugin.manager:sync_annotations(self.plugin.ui, nil, true)
+                    self.plugin.manager:sync_annotations(self.plugin:get_ui(), nil, true)
                 end,
             },
             {

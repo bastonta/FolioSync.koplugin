@@ -422,6 +422,107 @@ function Manager:push_all_data(ui, document, force_manual)
     end)
 end
 
+-- Navigate reader UI to position/page specified by location or percentage
+function Manager:goto_location(target_ui, remote_pos, remote_percent, total_pages, target_doc)
+    if not target_ui then
+        logger.warn("FolioSync Manager: cannot jump - target_ui is nil")
+        return false
+    end
+
+    logger.info(string.format("FolioSync Manager: restoring position (location=%s, percent=%s)", tostring(remote_pos), tostring(remote_percent)))
+
+    local doc = target_doc or (target_ui and target_ui.document)
+
+    -- 1. If location is provided (XPointer or page string)
+    if remote_pos and remote_pos ~= "" then
+        -- A. Check if remote_pos is a page identifier like "page_15" or numeric string "15"
+        local page_num = remote_pos:match("^page_(%d+)$") or remote_pos:match("^(%d+)$")
+        if page_num then
+            local page = tonumber(page_num)
+            if page and page > 0 then
+                logger.info("FolioSync Manager: jumping to page " .. tostring(page))
+                if target_ui.link and target_ui.link.goToPage then
+                    target_ui.link:goToPage(page)
+                elseif target_ui.gotoPage then
+                    target_ui:gotoPage(page)
+                elseif target_ui.handleEvent then
+                    target_ui:handleEvent(Event:new("GotoPage", page))
+                end
+                return true
+            end
+        end
+
+        -- B. Try resolving XPointer to page via document:getPageFromXPointer
+        if doc and doc.getPageFromXPointer then
+            local ok, page = pcall(function() return doc:getPageFromXPointer(remote_pos) end)
+            if ok and page and page > 0 then
+                logger.info("FolioSync Manager: resolved XPointer to page " .. tostring(page))
+                if target_ui.link and target_ui.link.goToPage then
+                    target_ui.link:goToPage(page)
+                    return true
+                elseif target_ui.gotoPage then
+                    target_ui:gotoPage(page)
+                    return true
+                elseif target_ui.handleEvent then
+                    target_ui:handleEvent(Event:new("GotoPage", page))
+                    return true
+                end
+            end
+        end
+
+        -- C. Dispatch GotoLocation event (standard KOReader event for XPointers/locations)
+        local jumped = false
+        if target_ui.handleEvent then
+            local res = target_ui:handleEvent(Event:new("GotoLocation", remote_pos))
+            if res ~= false then
+                jumped = true
+                logger.info("FolioSync Manager: dispatched GotoLocation event for " .. tostring(remote_pos))
+            end
+        end
+
+        -- D. Direct view gotoLocation fallback if handleEvent didn't handle it
+        if not jumped and target_ui.view and target_ui.view.gotoLocation then
+            local ok = pcall(function() target_ui.view:gotoLocation(remote_pos) end)
+            if ok then
+                jumped = true
+                logger.info("FolioSync Manager: jumped via view:gotoLocation: " .. tostring(remote_pos))
+            end
+        end
+
+        -- E. Direct ui gotoLocation fallback
+        if not jumped and target_ui.gotoLocation then
+            local ok = pcall(function() target_ui:gotoLocation(remote_pos) end)
+            if ok then
+                jumped = true
+                logger.info("FolioSync Manager: jumped via ui:gotoLocation: " .. tostring(remote_pos))
+            end
+        end
+
+        if jumped then
+            return true
+        end
+    end
+
+    -- 2. Fallback: try restoring by progress percentage if total_pages is known
+    if remote_percent and total_pages and total_pages > 0 then
+        local target_page = math.max(1, math.min(total_pages, math.floor((remote_percent / 100) * total_pages + 0.5)))
+        logger.info("FolioSync Manager: jumping to page " .. tostring(target_page) .. " via percentage fallback (" .. tostring(remote_percent) .. "%)")
+        if target_ui.link and target_ui.link.goToPage then
+            target_ui.link:goToPage(target_page)
+            return true
+        elseif target_ui.gotoPage then
+            target_ui:gotoPage(target_page)
+            return true
+        elseif target_ui.handleEvent then
+            target_ui:handleEvent(Event:new("GotoPage", target_page))
+            return true
+        end
+    end
+
+    logger.warn("FolioSync Manager: could not navigate to remote location/page")
+    return false
+end
+
 -- Fetch/pull all data (progress + annotations) for current document from Folio
 function Manager:pull_all_data(ui, document, force_manual)
     if force_manual == nil then force_manual = true end
@@ -457,15 +558,11 @@ function Manager:pull_all_data(ui, document, force_manual)
             if prog_ok and remote_data then
                 local remote_pos = remote_data.location
                 local remote_percent = remote_data.progressPercent or remote_data.progress_percent
-                local target_ui = info.ui or ui or self.ui
-                if remote_pos and remote_pos ~= "" and target_ui and target_ui.handleEvent then
-                    target_ui:handleEvent(Event:new("GotoXPointer", remote_pos))
-                elseif remote_percent and info.total_pages > 0 then
-                    local target_page = math.max(1, math.min(info.total_pages, math.floor((remote_percent / 100) * info.total_pages)))
-                    if target_ui and target_ui.link and target_ui.link.goToPage then
-                        target_ui.link:goToPage(target_page)
-                    end
-                end
+                local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
+                local target_doc = info.document or (target_ui and target_ui.document) or document
+
+                self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc)
+
                 if remote_percent then
                     progress_msg = T(_("Progress: %1%%"), math.floor(remote_percent))
                 end
