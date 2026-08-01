@@ -30,6 +30,20 @@ function FolioSync:init()
     self.manager.ui = self.ui
     self.browser.ui = self.ui
 
+    -- Ensure the plugin is in the ReaderUI event chain
+    if self.ui then
+        local found = false
+        for _, child in ipairs(self.ui) do
+            if child == self then
+                found = true
+                break
+            end
+        end
+        if not found then
+            table.insert(self.ui, self)
+        end
+    end
+
     self:onDispatcherRegisterActions()
 
     -- Load plugin translations dynamically if available for the active locale

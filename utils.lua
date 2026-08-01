@@ -79,4 +79,10 @@ function M.get_file_basename(path)
     return path:match("^.+[/\\](.+)$") or path
 end
 
+function M.clean_cfi(cfi)
+    if not cfi or type(cfi) ~= "string" then return nil end
+    local clean = cfi:gsub("epubcfi%((.-)%)", "%1")
+    return clean
+end
+
 return M

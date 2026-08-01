@@ -1,5 +1,6 @@
 local _ = require("gettext")
 local UIManager = require("ui/uimanager")
+local Event = require("ui/event")
 local InfoMessage = require("ui/widget/infomessage")
 local T = require("ffi/util").template
 local Event = require("ui/event")
@@ -552,6 +553,8 @@ function Manager:pull_all_data(ui, document, force_manual)
 
                 if remote_percent then
                     progress_msg = T(_("Progress: %1%%"), math.floor(remote_percent))
+                elseif target_page then
+                    progress_msg = T(_("Page %1"), target_page)
                 end
             end
 
@@ -578,6 +581,37 @@ function Manager:pull_all_data(ui, document, force_manual)
 
                     if added_count > 0 and docsettings.saveSetting then
                         docsettings:saveSetting("bookmark", local_bookmarks)
+                        docsettings:saveSetting("annotations", local_bookmarks)
+
+                        -- Update in-memory active KOReader UI widgets if open
+                        if ui then
+                            if ui.bookmark then
+                                ui.bookmark.bookmark = local_bookmarks
+                                if ui.bookmark.onSaveSettings then
+                                    ui.bookmark:onSaveSettings()
+                                end
+                            end
+                            if ui.annotation then
+                                ui.annotation.annotations = local_bookmarks
+                                if ui.annotation.onSaveSettings then
+                                    ui.annotation:onSaveSettings()
+                                end
+                            end
+
+                            -- Broadcast events to notify KOReader UI components
+                            UIManager:broadcastEvent(Event:new("AnnotationsModified", local_bookmarks))
+                            UIManager:broadcastEvent(Event:new("BookmarksModified", local_bookmarks))
+
+                            -- Redraw view so highlights and annotations display immediately
+                            if not document.is_pdf then
+                                if document.render then document:render() end
+                                if ui.view and ui.view.recalculate then ui.view:recalculate() end
+                                if ui.view and ui.view.dialog then UIManager:setDirty(ui.view.dialog, "partial") end
+                            else
+                                if document.resetTileCacheValidity then document:resetTileCacheValidity() end
+                                if ui.view and ui.view.dialog then UIManager:setDirty(ui.view.dialog, "ui") end
+                            end
+                        end
                     end
                 end
 
