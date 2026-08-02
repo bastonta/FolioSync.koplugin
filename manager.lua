@@ -1,7 +1,5 @@
 local _ = require("gettext")
 local UIManager = require("ui/uimanager")
-local Event = require("ui/event")
-local InfoMessage = require("ui/widget/infomessage")
 local T = require("ffi/util").template
 local Event = require("ui/event")
 local logger = require("logger")
@@ -114,7 +112,8 @@ function Manager:get_doc_info(ui, document)
     end
 
     -- 3. Check DocSettings object directly (if target_ui or target_doc IS a DocSettings instance)
-    local ds_candidate = docsettings or (target_ui and target_ui.data and target_ui) or (target_doc and target_doc.data and target_doc)
+    local ds_candidate = docsettings or (target_ui and target_ui.data and target_ui) or
+        (target_doc and target_doc.data and target_doc)
     if ds_candidate and ds_candidate.data then
         local data = ds_candidate.data
         if not file_path and data.doc_path then
@@ -326,7 +325,8 @@ function Manager:sync_progress(ui, document, is_silent)
                     remote_percent = remote_percent * 100
                 end
                 if remote_percent > percent and not is_silent then
-                    logger.info(string.format("FolioSync: remote progress (%d%%) ahead of local (%d%%)", math.floor(remote_percent), math.floor(percent)))
+                    logger.info(string.format("FolioSync: remote progress (%d%%) ahead of local (%d%%)",
+                        math.floor(remote_percent), math.floor(percent)))
                 end
             end
 
@@ -599,7 +599,8 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
         local pct = tonumber(remote_percent) or 0
         if pct <= 1 then pct = pct * 100 end
         local target_page = math.max(1, math.min(total_pages, math.floor((pct / 100) * total_pages + 0.5)))
-        logger.info("FolioSync Manager: jumping to page " .. tostring(target_page) .. " via percentage fallback (" .. tostring(remote_percent) .. "%)")
+        logger.info("FolioSync Manager: jumping to page " ..
+            tostring(target_page) .. " via percentage fallback (" .. tostring(remote_percent) .. "%)")
         ui:handleEvent(Event:new("GotoPage", target_page))
         return true
     end
@@ -649,7 +650,8 @@ function Manager:pull_all_data(ui, document, force_manual)
                         remote_percent = remote_percent * 100
                     end
                 end
-                local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
+                local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or
+                    self.ui
                 local target_doc = info.document or (target_ui and target_ui.document) or document
 
                 self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc)
@@ -663,11 +665,13 @@ function Manager:pull_all_data(ui, document, force_manual)
             self.api:list_annotations(book_id, function(anno_ok, remote_annos)
                 local added_count = 0
                 local docsettings = info.docsettings
-                local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
+                local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or
+                    self.ui
                 local target_doc = info.document or (target_ui and target_ui.document) or document
 
                 if anno_ok and remote_annos and docsettings and docsettings.readSetting then
-                    local local_annos = docsettings:readSetting("annotations") or (target_ui and target_ui.annotation and target_ui.annotation.annotations) or {}
+                    local local_annos = docsettings:readSetting("annotations") or
+                        (target_ui and target_ui.annotation and target_ui.annotation.annotations) or {}
 
                     for _, l_item in ipairs(local_annos) do
                         annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
@@ -687,7 +691,8 @@ function Manager:pull_all_data(ui, document, force_manual)
                             if converted then
                                 found_l_item.note = converted.note or found_l_item.note
                                 found_l_item.color = converted.color or found_l_item.color
-                                found_l_item.datetime_updated = converted.datetime_updated or found_l_item.datetime_updated
+                                found_l_item.datetime_updated = converted.datetime_updated or
+                                    found_l_item.datetime_updated
                             end
                             annotations_helper.sanitize_koreader_annotation(found_l_item, target_doc)
                         elseif converted then
@@ -711,11 +716,20 @@ function Manager:pull_all_data(ui, document, force_manual)
                         if target_doc then
                             if not target_doc.is_pdf then
                                 if target_doc.render then target_doc:render() end
-                                if target_ui and target_ui.view and target_ui.view.recalculate then target_ui.view:recalculate() end
-                                if target_ui and target_ui.view and target_ui.view.dialog then UIManager:setDirty(target_ui.view.dialog, "partial") end
+                                if target_ui and target_ui.view and target_ui.view.recalculate then
+                                    target_ui.view
+                                        :recalculate()
+                                end
+                                if target_ui and target_ui.view and target_ui.view.dialog then
+                                    UIManager:setDirty(
+                                        target_ui.view.dialog, "partial")
+                                end
                             else
                                 if target_doc.resetTileCacheValidity then target_doc:resetTileCacheValidity() end
-                                if target_ui and target_ui.view and target_ui.view.dialog then UIManager:setDirty(target_ui.view.dialog, "ui") end
+                                if target_ui and target_ui.view and target_ui.view.dialog then
+                                    UIManager:setDirty(
+                                        target_ui.view.dialog, "ui")
+                                end
                             end
                         end
                     end
@@ -725,10 +739,11 @@ function Manager:pull_all_data(ui, document, force_manual)
                 self.api:list_bookmarks(book_id, function(bm_ok, remote_bms)
                     local bm_added = 0
                     if bm_ok and remote_bms and docsettings and docsettings.readSetting then
-                        local local_bms = docsettings:readSetting("bookmark") or (target_ui and target_ui.bookmark and target_ui.bookmark.bookmark) or {}
+                        local local_bms = docsettings:readSetting("bookmark") or
+                            (target_ui and target_ui.bookmark and target_ui.bookmark.bookmark) or {}
 
                         for _, r_bm in ipairs(remote_bms) do
-                            local converted_bm = annotations_helper.folio_to_koreader_bookmark(r_bm, target_doc)
+                            local converted_bm = annotations_helper.folio_to_koreader_bookmark(r_bm)
                             local found = false
                             for _, l_bm in ipairs(local_bms) do
                                 if annotations_helper.is_same_annotation(l_bm, r_bm) or annotations_helper.is_same_annotation(l_bm, converted_bm) then
@@ -757,9 +772,11 @@ function Manager:pull_all_data(ui, document, force_manual)
                     if force_manual then
                         local total_added = added_count + bm_added
                         if total_added > 0 then
-                            utils.show_msg(T(_("Fetched remote data: %1 (%2 new items)"), progress_msg ~= "" and progress_msg or _("Progress updated"), total_added))
+                            utils.show_msg(T(_("Fetched remote data: %1 (%2 new items)"),
+                                progress_msg ~= "" and progress_msg or _("Progress updated"), total_added))
                         else
-                            utils.show_msg(T(_("Fetched remote data: %1"), progress_msg ~= "" and progress_msg or _("Up to date")))
+                            utils.show_msg(T(_("Fetched remote data: %1"),
+                                progress_msg ~= "" and progress_msg or _("Up to date")))
                         end
                     end
                 end)

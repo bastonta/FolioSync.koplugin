@@ -1,4 +1,27 @@
 {
   "makefile.configureOnOpen": false,
-  "cSpell.words": ["infomessage", "inputdialog", "uimanager", "xpointer"]
+  "cSpell.words": [
+    "annos",
+    "annot",
+    "autosync",
+    "confirmbox",
+    "docsettings",
+    "epub",
+    "epubcfi",
+    "foliosync",
+    "infomessage",
+    "inputdialog",
+    "koplugin",
+    "koreader",
+    "MSGFMT",
+    "pageno",
+    "readerui",
+    "sdcard",
+    "sockethttp",
+    "socketutil",
+    "uimanager",
+    "widgetcontainer",
+    "XGETTEXT",
+    "xpointer"
+  ]
 }

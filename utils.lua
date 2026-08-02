@@ -54,7 +54,7 @@ function M.isPossiblyJson(content)
 end
 
 function M.show_msg(msg, timeout)
-    UIManager:show(InfoMessage:new{
+    UIManager:show(InfoMessage:new {
         text = msg,
         timeout = timeout or 3,
     })

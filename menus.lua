@@ -1,9 +1,7 @@
 local _ = require("gettext")
 local UIManager = require("ui/uimanager")
-local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local T = require("ffi/util").template
-local logger = require("logger")
 local utils = require("utils")
 
 local Menus = {}
@@ -104,7 +102,7 @@ end
 
 function Menus:prompt_server_url()
     local dialog
-    dialog = InputDialog:new{
+    dialog = InputDialog:new {
         title = _("Folio Server URL"),
         input = self.plugin.settings.server_url or "http://192.168.1.100:8080",
         description = _("Enter the base URL of your self-hosted Folio backend."),
@@ -136,7 +134,7 @@ end
 
 function Menus:prompt_download_dir()
     local dialog
-    dialog = InputDialog:new{
+    dialog = InputDialog:new {
         title = _("Download Folder Path"),
         input = self.plugin.settings.download_dir or "/sdcard/books/FolioSync",
         description = _("Location on device where downloaded books will be stored."),
@@ -170,7 +168,7 @@ end
 
 function Menus:prompt_api_key()
     local dialog
-    dialog = InputDialog:new{
+    dialog = InputDialog:new {
         title = _("Folio API Key"),
         input = self.plugin.settings.api_key or "",
         description = _("Enter API key generated from your Folio profile."),

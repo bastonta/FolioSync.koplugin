@@ -1,6 +1,3 @@
-local logger = require("logger")
-local utils = require("utils")
-
 local M = {}
 
 -- Sanitize KOReader bookmark/highlight item to exact minimal schema
@@ -79,7 +76,12 @@ end
 function M.koreader_to_folio_annotation(kr_item)
     if not kr_item then return nil end
 
-    local pos0 = kr_item.pos0 or (type(kr_item.page) == "string" and kr_item.page)
+    ---@type string|table|nil
+    local pos0 = kr_item.pos0
+    if not pos0 and type(kr_item.page) == "string" then
+        pos0 = kr_item.page
+    end
+
     local page_num = type(kr_item.page) == "number" and kr_item.page or nil
 
     if type(pos0) == "table" then
@@ -163,7 +165,7 @@ function M.folio_to_koreader_annotation(folio_item, target_doc)
 end
 
 -- Convert Folio Bookmark response item to KOReader bookmark item
-function M.folio_to_koreader_bookmark(folio_bm, target_doc)
+function M.folio_to_koreader_bookmark(folio_bm)
     if not folio_bm then return nil end
     local location = folio_bm.location or folio_bm.locationStart or folio_bm.pos0 or "page_1"
     local page = location:match("^page_(%d+)$") and tonumber(location:match("^page_(%d+)$")) or location
@@ -180,7 +182,8 @@ end
 -- Convert KOReader bookmark item to Folio Bookmark payload
 function M.koreader_to_folio_bookmark(kr_bm)
     if not kr_bm then return nil end
-    local location = kr_bm.pos0 or (type(kr_bm.page) == "string" and kr_bm.page) or (type(kr_bm.page) == "number" and string.format("page_%d", kr_bm.page)) or "page_1"
+    local location = kr_bm.pos0 or (type(kr_bm.page) == "string" and kr_bm.page) or
+        (type(kr_bm.page) == "number" and string.format("page_%d", kr_bm.page)) or "page_1"
     return {
         location = location,
         title = type(kr_bm.text) == "string" and kr_bm.text ~= "" and kr_bm.text or "Bookmark",
@@ -193,15 +196,19 @@ function M.is_same_annotation(item_a, item_b)
     if item_a.folio_id and item_b.folio_id and item_a.folio_id == item_b.folio_id then
         return true
     end
-    local pos_a = type(item_a.pos0) == "string" and item_a.pos0 or item_a.locationStart or (type(item_a.page) == "string" and item_a.page) or ""
-    local pos_b = type(item_b.pos0) == "string" and item_b.pos0 or item_b.locationStart or (type(item_b.page) == "string" and item_b.page) or ""
+    local pos_a = type(item_a.pos0) == "string" and item_a.pos0 or item_a.locationStart or
+        (type(item_a.page) == "string" and item_a.page) or ""
+    local pos_b = type(item_b.pos0) == "string" and item_b.pos0 or item_b.locationStart or
+        (type(item_b.page) == "string" and item_b.page) or ""
 
     if pos_a ~= "" and pos_a == pos_b then
         return true
     end
 
-    local text_a = type(item_a.text) == "string" and item_a.text or (type(item_a.selectedText) == "string" and item_a.selectedText) or ""
-    local text_b = type(item_b.text) == "string" and item_b.text or (type(item_b.selectedText) == "string" and item_b.selectedText) or ""
+    local text_a = type(item_a.text) == "string" and item_a.text or
+        (type(item_a.selectedText) == "string" and item_a.selectedText) or ""
+    local text_b = type(item_b.text) == "string" and item_b.text or
+        (type(item_b.selectedText) == "string" and item_b.selectedText) or ""
 
     if text_a ~= "" and text_a == text_b then
         return true

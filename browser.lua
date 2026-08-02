@@ -5,7 +5,6 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local InputDialog = require("ui/widget/inputdialog")
 local Menu = require("ui/widget/menu")
 local T = require("ffi/util").template
-local logger = require("logger")
 local utils = require("utils")
 
 local FolioBrowser = {}
@@ -34,14 +33,14 @@ end
 
 function FolioBrowser:load_and_render()
     if not self.api:has_auth() then
-        UIManager:show(InfoMessage:new{
+        UIManager:show(InfoMessage:new {
             text = _("Please enter your Folio API Key in Settings."),
             timeout = 4,
         })
         return
     end
 
-    UIManager:show(InfoMessage:new{
+    UIManager:show(InfoMessage:new {
         text = _("Fetching library from Folio..."),
         timeout = 2,
     })
@@ -50,7 +49,7 @@ function FolioBrowser:load_and_render()
 
     self.api:browse(self.current_series_id, self.sort_by, offset, self.limit, function(success, response)
         if not success or not response then
-            UIManager:show(InfoMessage:new{
+            UIManager:show(InfoMessage:new {
                 text = _("Failed to load library from Folio server."),
                 timeout = 4,
             })
@@ -87,7 +86,8 @@ function FolioBrowser:render_menu(items, total)
     end
 
     -- Sorting options
-    local sort_label = self.sort_by == "recent" and _("Recent") or (self.sort_by == "sortOrder" and _("Sort Order") or _("Name"))
+    local sort_label = self.sort_by == "recent" and _("Recent") or
+        (self.sort_by == "sortOrder" and _("Sort Order") or _("Name"))
     table.insert(item_table, {
         text = T(_("🔃 Sort: %1 (tap to change)"), sort_label),
         callback = function()
@@ -117,7 +117,8 @@ function FolioBrowser:render_menu(items, total)
                 })
             else
                 local author = item.author or ""
-                local display_text = (author ~= "") and string.format("📖 %s - %s", name, author) or string.format("📖 %s", name)
+                local display_text = (author ~= "") and string.format("📖 %s - %s", name, author) or
+                    string.format("📖 %s", name)
 
                 table.insert(item_table, {
                     text = display_text,
@@ -143,7 +144,7 @@ function FolioBrowser:render_menu(items, total)
 
     local location_title = (#self.series_stack > 0) and self.series_stack[#self.series_stack].name or _("Folio Library")
     local title_str = T(_("%1 (%2 items)"), location_title, total)
-    local menu = Menu:new{
+    local menu = Menu:new {
         title = title_str,
         item_table = item_table,
         on_close = function() end,
@@ -179,7 +180,7 @@ function FolioBrowser:prompt_sort_by()
             end,
         },
     }
-    local menu = Menu:new{
+    local menu = Menu:new {
         title = _("Select Sorting Order"),
         item_table = item_table,
     }
@@ -207,7 +208,7 @@ function FolioBrowser:prompt_pagination(max_page)
         })
     end
 
-    local menu = Menu:new{
+    local menu = Menu:new {
         title = _("Select Page"),
         item_table = item_table,
     }
@@ -233,7 +234,7 @@ function FolioBrowser:on_book_selected(book)
         },
     }
 
-    local menu = Menu:new{
+    local menu = Menu:new {
         title = T(_("Download '%1'"), book_title),
         item_table = item_table,
     }
@@ -242,7 +243,7 @@ end
 
 function FolioBrowser:prompt_custom_download_dir(book, current_dir)
     local dialog
-    dialog = InputDialog:new{
+    dialog = InputDialog:new {
         title = _("Custom Download Folder"),
         input = current_dir,
         description = _("Enter folder path on device to save this book:"),
@@ -294,7 +295,7 @@ function FolioBrowser:start_download(book, download_dir)
         confirm_text = T(_("Download '%1' to '%2'?"), book_title, download_dir)
     end
 
-    local confirm = ConfirmBox:new{
+    local confirm = ConfirmBox:new {
         text = confirm_text,
         ok_text = file_exists and _("Redownload") or _("Download"),
         cancel_text = _("Cancel"),
@@ -303,14 +304,14 @@ function FolioBrowser:start_download(book, download_dir)
             pcall(require, "lfs")
             os.execute("mkdir -p \"" .. download_dir .. "\"")
 
-            UIManager:show(InfoMessage:new{
+            UIManager:show(InfoMessage:new {
                 text = T(_("Downloading '%1'..."), book_title),
                 timeout = 5,
             })
 
             self.api:download_book(book.id, target_path, function(success, res)
                 if success then
-                    local open_box = ConfirmBox:new{
+                    local open_box = ConfirmBox:new {
                         text = T(_("'%1' downloaded successfully to:\n%2\n\nDo you want to open it now?"), book_title, download_dir),
                         ok_text = _("Open Book"),
                         cancel_text = _("Close"),
@@ -323,7 +324,7 @@ function FolioBrowser:start_download(book, download_dir)
                     }
                     UIManager:show(open_box)
                 else
-                    UIManager:show(InfoMessage:new{
+                    UIManager:show(InfoMessage:new {
                         text = T(_("Failed to download book: %1"), tostring(res)),
                         timeout = 4,
                     })

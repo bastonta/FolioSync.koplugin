@@ -3,7 +3,6 @@ local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
 local gettext = require("gettext")
 local _ = gettext
-local logger = require("logger")
 
 local FolioAPI = require("folio_api")
 local FolioBrowser = require("browser")

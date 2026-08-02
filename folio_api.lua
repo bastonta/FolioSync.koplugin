@@ -117,7 +117,6 @@ function FolioAPI:get_headers()
     return make_headers(self:get_api_key())
 end
 
-
 function FolioAPI:find_book_by_hash(file_hash, callback)
     local base_url = self:get_server_url()
     local url = base_url .. "/books/by-hash/" .. tostring(file_hash)
@@ -154,7 +153,6 @@ function FolioAPI:find_book_by_hash(file_hash, callback)
     if callback then callback(false, msg) end
     return false, msg
 end
-
 
 function FolioAPI:browse(series_id, sort_by, offset, limit, callback)
     local base_url = self:get_server_url()
@@ -411,7 +409,8 @@ end
 
 function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback)
     local base_url = self:get_server_url()
-    local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id) .. "?format=xpointer"
+    local url = base_url ..
+    "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id) .. "?format=xpointer"
 
     local payload = json.encode({
         locationStart = annotation.locationStart or "",
