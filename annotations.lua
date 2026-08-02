@@ -23,7 +23,7 @@ function M.sanitize_koreader_annotation(kr_item, target_doc)
     kr_item.pos0 = pos0
 
     -- 2. Set page field: for XPointer annotations, KOReader sets page = pos0 (XPointer string)
-    if type(kr_item.pos0) == "string" and kr_item.pos0:sub(1, 1) == "/" then
+    if type(kr_item.pos0) == "string" and (kr_item.pos0:sub(1, 1) == "/" or kr_item.pos0:find("DocFragment") or kr_item.pos0:find("text%(%)")) then
         kr_item.page = kr_item.pos0
     elseif not kr_item.page or kr_item.page == "" then
         local p_from_pos = type(kr_item.pos0) == "string" and kr_item.pos0:match("^page_(%d+)$")
@@ -208,6 +208,16 @@ function M.is_same_annotation(item_a, item_b)
     end
 
     return false
+end
+
+-- Check if item is a highlight/text annotation (has non-empty pos0 and pos1)
+function M.is_annotation(item)
+    return item and item.pos0 and item.pos0 ~= "" and item.pos1 and item.pos1 ~= ""
+end
+
+-- Check if item is a page bookmark (has pos0/page, but empty pos1)
+function M.is_bookmark(item)
+    return item and (item.pos0 or item.page) and not M.is_annotation(item)
 end
 
 return M

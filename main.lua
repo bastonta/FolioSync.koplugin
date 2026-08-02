@@ -1,8 +1,6 @@
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
-local Event = require("ui/event")
-local UIManager = require("ui/uimanager")
 local gettext = require("gettext")
 local _ = gettext
 local logger = require("logger")
@@ -15,7 +13,7 @@ local utils = require("utils")
 
 local SETTINGS_FILE = DataStorage:getSettingsDir() .. "/folio_settings.json"
 
-local FolioSync = WidgetContainer:extend{
+local FolioSync = WidgetContainer:extend {
     name = "FolioSync",
     is_doc_only = false,
 }
@@ -73,6 +71,9 @@ function FolioSync:onReaderReady()
     -- ReaderReady event has no arguments, so we must NOT overwrite self.ui
     self.manager.ui = self.ui
     self.browser.ui = self.ui
+    if self.ui and self.ui.menu then
+        self.ui.menu:registerToMainMenu(self)
+    end
     self:onDispatcherRegisterActions()
 end
 
@@ -120,13 +121,24 @@ end
 
 function FolioSync:onDispatcherRegisterActions()
     Dispatcher:registerAction("foliosync_set_autosync",
-        { category="string", event="FolioSyncToggleAutoSync", title=_("FolioSync: Set auto progress sync"), reader=true,
-        args={true, false}, toggle={_("on"), _("off")},})
-    Dispatcher:registerAction("foliosync_toggle_autosync", { category="none", event="FolioSyncToggleAutoSync", title=_("FolioSync: Toggle auto progress sync"), reader=true,})
-    Dispatcher:registerAction("foliosync_push_doc", { category="none", event="FolioSyncPushDoc", title=_("FolioSync: Push document data to server"), reader=true,})
-    Dispatcher:registerAction("foliosync_pull_doc", { category="none", event="FolioSyncPullDoc", title=_("FolioSync: Pull document data from server"), reader=true,})
-    Dispatcher:registerAction("foliosync_sync_doc", { category="none", event="FolioSyncCurrentDoc", title=_("FolioSync: Sync active document"), reader=true, separator=true,})
-    Dispatcher:registerAction("foliosync_browse", { category="none", event="FolioSyncBrowse", title=_("FolioSync: Browse library"), general=true,})
+        {
+            category = "string",
+            event = "FolioSyncToggleAutoSync",
+            title = _("FolioSync: Set auto progress sync"),
+            reader = true,
+            args = { true, false },
+            toggle = { _("on"), _("off") },
+        })
+    Dispatcher:registerAction("foliosync_toggle_autosync",
+        { category = "none", event = "FolioSyncToggleAutoSync", title = _("FolioSync: Toggle auto progress sync"), reader = true, })
+    Dispatcher:registerAction("foliosync_push_doc",
+        { category = "none", event = "FolioSyncPushDoc", title = _("FolioSync: Push document data to server"), reader = true, })
+    Dispatcher:registerAction("foliosync_pull_doc",
+        { category = "none", event = "FolioSyncPullDoc", title = _("FolioSync: Pull document data from server"), reader = true, })
+    Dispatcher:registerAction("foliosync_sync_doc",
+        { category = "none", event = "FolioSyncCurrentDoc", title = _("FolioSync: Sync active document"), reader = true, separator = true, })
+    Dispatcher:registerAction("foliosync_browse",
+        { category = "none", event = "FolioSyncBrowse", title = _("FolioSync: Browse library"), general = true, })
 end
 
 function FolioSync:onFolioSyncToggleAutoSync(enable)

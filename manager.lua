@@ -54,7 +54,7 @@ end
 
 -- Extract document metadata and settings from whatever object is available (ReaderUI, Document, or DocSettings)
 function Manager:get_doc_info(ui, document)
-    local target_ui = ui or self.ui
+    local target_ui = ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or self.ui
     local target_doc = document or (target_ui and target_ui.document)
 
     local file_path = nil
@@ -86,14 +86,25 @@ function Manager:get_doc_info(ui, document)
             local ok, count = pcall(function() return target_ui.document:getPageCount() end)
             if ok and count then total_pages = count end
         end
-        if target_ui.link and target_ui.link.getPage then
-            local ok, page = pcall(function() return target_ui.link:getPage() end)
+        if target_ui.getCurrentPage then
+            local ok, page = pcall(function() return target_ui:getCurrentPage() end)
             if ok and page then current_page = page end
         end
-        if target_ui.view and target_ui.view.getXPointer then
-            local ok, xptr = pcall(function() return target_ui.view:getXPointer() end)
-            if ok and xptr then location = xptr end
+
+        local paging_module = target_ui.paging or target_ui.rolling
+        if paging_module then
+            if paging_module.getLastPercent then
+                local ok, p = pcall(function() return paging_module:getLastPercent() end)
+                if ok and p then
+                    percent = p <= 1 and (p * 100) or p
+                end
+            end
+            if paging_module.getLastProgress then
+                local ok, pos = pcall(function() return paging_module:getLastProgress() end)
+                if ok and pos then location = pos end
+            end
         end
+
         if not docsettings and target_ui.doc_settings then
             docsettings = target_ui.doc_settings
         end
@@ -119,7 +130,7 @@ function Manager:get_doc_info(ui, document)
             location = data.last_xpointer
         end
         if percent == 0 and data.percent_finished then
-            percent = data.percent_finished * 100
+            percent = data.percent_finished <= 1 and (data.percent_finished * 100) or data.percent_finished
         end
         if not docsettings then
             docsettings = ds_candidate
@@ -138,6 +149,23 @@ function Manager:get_doc_info(ui, document)
                         file_path = widget.document.file
                         target_ui = widget
                         target_doc = widget.document
+                        if widget.getCurrentPage then
+                            local ok_p, page = pcall(function() return widget:getCurrentPage() end)
+                            if ok_p and page then current_page = page end
+                        end
+                        local paging = widget.paging or widget.rolling
+                        if paging then
+                            if percent == 0 and paging.getLastPercent then
+                                local ok_pct, p = pcall(function() return paging:getLastPercent() end)
+                                if ok_pct and p then
+                                    percent = p <= 1 and (p * 100) or p
+                                end
+                            end
+                            if not location and paging.getLastProgress then
+                                local ok_pos, pos = pcall(function() return paging:getLastProgress() end)
+                                if ok_pos and pos then location = pos end
+                            end
+                        end
                         break
                     elseif widget.doc_settings and widget.doc_settings.data and widget.doc_settings.data.doc_path then
                         file_path = widget.doc_settings.data.doc_path
@@ -162,6 +190,9 @@ function Manager:get_doc_info(ui, document)
     end
     if percent == 0 and total_pages > 0 and current_page > 1 then
         percent = (current_page / total_pages) * 100
+    end
+    if percent > 0 and percent <= 1 then
+        percent = percent * 100
     end
 
     return {
@@ -289,10 +320,13 @@ function Manager:sync_progress(ui, document, is_silent)
         -- Fetch remote progress first
         self.api:get_progress(book_id, function(success, remote_data)
             local should_push = true
-            if success and remote_data and remote_data.progressPercent then
-                local remote_percent = remote_data.progressPercent or 0
+            if success and remote_data and (remote_data.progressPercent or remote_data.progress_percent) then
+                local remote_percent = remote_data.progressPercent or remote_data.progress_percent or 0
+                if remote_percent <= 1 and remote_percent > 0 then
+                    remote_percent = remote_percent * 100
+                end
                 if remote_percent > percent and not is_silent then
-                    logger.info(string.format("FolioSync: remote progress (%d%%) ahead of local (%d%%)", remote_percent, percent))
+                    logger.info(string.format("FolioSync: remote progress (%d%%) ahead of local (%d%%)", math.floor(remote_percent), math.floor(percent)))
                 end
             end
 
@@ -349,11 +383,15 @@ function Manager:sync_annotations(ui, document, force_manual)
             local docsettings = info.docsettings
             local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
             local target_doc = info.document or (target_ui and target_ui.document) or document
-            local local_annos = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
+            local raw_items = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
+            local local_annos = {}
 
-            -- Sanitize pre-existing local annotations
-            for _, l_item in ipairs(local_annos) do
+            -- Sanitize pre-existing local annotations and filter only text highlights/annotations
+            for _, l_item in ipairs(raw_items) do
                 annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
+                if annotations_helper.is_annotation(l_item) then
+                    table.insert(local_annos, l_item)
+                end
             end
 
             -- 3. Merge: Push local items that are missing on remote
@@ -396,7 +434,19 @@ function Manager:sync_bookmarks(ui, document, force_manual)
             local docsettings = info.docsettings
             local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
             local target_doc = info.document or (target_ui and target_ui.document) or document
-            local local_bms = docsettings and docsettings.readSetting and docsettings:readSetting("bookmark") or {}
+            local raw_items = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
+            local legacy_bms = docsettings and docsettings.readSetting and docsettings:readSetting("bookmark") or {}
+            local local_bms = {}
+
+            for _, l_item in ipairs(raw_items) do
+                annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
+                if annotations_helper.is_bookmark(l_item) then
+                    table.insert(local_bms, l_item)
+                end
+            end
+            for _, l_bm in ipairs(legacy_bms) do
+                table.insert(local_bms, l_bm)
+            end
 
             for _, l_bm in ipairs(local_bms) do
                 local found = false
@@ -466,66 +516,91 @@ end
 
 -- Navigate reader UI to position/page specified by location or percentage
 function Manager:goto_location(target_ui, remote_pos, remote_percent, total_pages, target_doc)
-    -- Resolve UI: find a real ReaderUI widget with handleEvent
+    local UIMgr = require("ui/uimanager")
+    local Event = require("ui/event")
+
+    -- 1. Robust UI Resolution: find an active ReaderUI instance with document and handleEvent
     local ui = nil
-    if self.plugin and self.plugin.ui and self.plugin.ui.handleEvent then
+    if target_ui and target_ui.document and target_ui.handleEvent then
+        ui = target_ui
+    elseif self.plugin and self.plugin.ui and self.plugin.ui.document and self.plugin.ui.handleEvent then
         ui = self.plugin.ui
     elseif self.plugin and self.plugin.get_ui then
         local got = self.plugin:get_ui()
-        if got and got.handleEvent then ui = got end
-    elseif target_ui and target_ui.handleEvent then
-        ui = target_ui
-    elseif self.ui and self.ui.handleEvent then
-        ui = self.ui
+        if got and got.document and got.handleEvent then ui = got end
     end
 
-    if not remote_pos or remote_pos == "" then
-        if remote_percent and total_pages and total_pages > 1 then
-            local pct = tonumber(remote_percent) or 0
-            if pct <= 1 then pct = pct * 100 end
-            local target_page = math.max(1, math.min(total_pages, math.floor((pct / 100) * total_pages + 0.5)))
-            if ui then ui:handleEvent(Event:new("GotoPage", target_page)) end
-            return true
+    if not ui and UIMgr then
+        local stack = UIMgr._stack or UIMgr.stack or {}
+        for i = #stack, 1, -1 do
+            local widget = stack[i]
+            if widget and widget.document and widget.handleEvent then
+                ui = widget
+                break
+            end
         end
+    end
+
+    if not ui then
+        logger.warn("FolioSync Manager: cannot perform goto_location, ReaderUI not found")
         return false
     end
 
-    local doc = target_doc or (ui and ui.document)
+    local doc = target_doc or ui.document
 
-    -- A. Check if remote_pos is a page_N string
-    local target_page = remote_pos:match("^page_(%d+)$")
-    if target_page then
-        target_page = tonumber(target_page)
-        logger.info("FolioSync Manager: restoring position page " .. tostring(target_page))
-        if ui then ui:handleEvent(Event:new("GotoPage", target_page)) end
-        return true
+    -- 2. If remote_pos is an XPointer string (starts with '/' or contains 'DocFragment' / 'text()')
+    if type(remote_pos) == "string" and remote_pos ~= "" and not remote_pos:match("^page_%d+$") then
+        logger.info("FolioSync Manager: attempting jump to XPointer " .. tostring(remote_pos))
+
+        -- Method A: KOReader's native ReaderLink widget (best precision: moves page AND scrolls to element)
+        if ui.link and ui.link.onGotoLink then
+            local ok = pcall(function() ui.link:onGotoLink({ xpointer = remote_pos }) end)
+            if ok then
+                logger.info("FolioSync Manager: successfully jumped via ui.link:onGotoLink")
+                return true
+            end
+        end
+
+        -- Method B: GotoPos event
+        local ok_event = pcall(function()
+            ui:handleEvent(Event:new("GotoPos", remote_pos))
+            UIMgr:broadcastEvent(Event:new("GotoPos", remote_pos))
+        end)
+        if ok_event then
+            logger.info("FolioSync Manager: successfully jumped via GotoPos event")
+            return true
+        end
+
+        -- Method C: Resolve XPointer to page number as fallback
+        if doc and doc.getPageFromXPointer then
+            local ok, page_num = pcall(function() return doc:getPageFromXPointer(remote_pos) end)
+            if ok and page_num and tonumber(page_num) and tonumber(page_num) > 0 then
+                local target_page = tonumber(page_num)
+                logger.info("FolioSync Manager: resolved XPointer fallback page " .. tostring(target_page))
+                ui:handleEvent(Event:new("GotoPage", target_page))
+                return true
+            end
+        end
     end
 
-    -- B. Try resolving XPointer to page via document:getPageFromXPointer
-    if doc and doc.getPageFromXPointer then
-        local ok, page_num = pcall(function() return doc:getPageFromXPointer(remote_pos) end)
-        if ok and page_num and tonumber(page_num) and tonumber(page_num) > 0 then
-            target_page = tonumber(page_num)
-            logger.info("FolioSync Manager: resolved XPointer to page " .. tostring(target_page))
-            if ui then ui:handleEvent(Event:new("GotoPage", target_page)) end
+    -- 3. Check if remote_pos is a page_N string (e.g. "page_15")
+    if type(remote_pos) == "string" then
+        local target_page = remote_pos:match("^page_(%d+)$")
+        if target_page then
+            target_page = tonumber(target_page)
+            logger.info("FolioSync Manager: restoring position page " .. tostring(target_page))
+            ui:handleEvent(Event:new("GotoPage", target_page))
             return true
         end
     end
 
-    -- C. Try direct XPointer link jump
-    if ui and ui.link and ui.link.onGotoLink then
-        logger.info("FolioSync Manager: jumping to XPointer " .. tostring(remote_pos))
-        local ok = pcall(function() ui.link:onGotoLink({ xpointer = remote_pos }) end)
-        if ok then return true end
-    end
-
-    -- D. Fallback: percentage
+    -- 4. Fallback: navigate by percentage (0..1 or 0..100)
     if remote_percent and total_pages and total_pages > 1 then
         local pct = tonumber(remote_percent) or 0
         if pct <= 1 then pct = pct * 100 end
         local target_page = math.max(1, math.min(total_pages, math.floor((pct / 100) * total_pages + 0.5)))
         logger.info("FolioSync Manager: jumping to page " .. tostring(target_page) .. " via percentage fallback (" .. tostring(remote_percent) .. "%)")
-        if ui then ui:handleEvent(Event:new("GotoPage", target_page)) end
+        ui:handleEvent(Event:new("GotoPage", target_page))
         return true
     end
 
@@ -568,6 +643,12 @@ function Manager:pull_all_data(ui, document, force_manual)
             if prog_ok and remote_data then
                 local remote_pos = remote_data.location
                 local remote_percent = remote_data.progressPercent or remote_data.progress_percent
+                if remote_percent and tonumber(remote_percent) then
+                    remote_percent = tonumber(remote_percent)
+                    if remote_percent <= 1 and remote_percent > 0 then
+                        remote_percent = remote_percent * 100
+                    end
+                end
                 local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
                 local target_doc = info.document or (target_ui and target_ui.document) or document
 
