@@ -311,8 +311,6 @@ function Manager:sync_progress(ui, document, is_silent)
             return
         end
 
-        local current_page = info.current_page
-        local total_pages = info.total_pages
         local percent = info.percent
         local location = info.location
 
@@ -321,9 +319,6 @@ function Manager:sync_progress(ui, document, is_silent)
             local should_push = true
             if success and remote_data and (remote_data.progressPercent or remote_data.progress_percent) then
                 local remote_percent = remote_data.progressPercent or remote_data.progress_percent or 0
-                if remote_percent <= 1 and remote_percent > 0 then
-                    remote_percent = remote_percent * 100
-                end
                 if remote_percent > percent and not is_silent then
                     logger.info(string.format("FolioSync: remote progress (%d%%) ahead of local (%d%%)",
                         math.floor(remote_percent), math.floor(percent)))
@@ -597,7 +592,6 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
     -- 4. Fallback: navigate by percentage (0..1 or 0..100)
     if remote_percent and total_pages and total_pages > 1 then
         local pct = tonumber(remote_percent) or 0
-        if pct <= 1 then pct = pct * 100 end
         local target_page = math.max(1, math.min(total_pages, math.floor((pct / 100) * total_pages + 0.5)))
         logger.info("FolioSync Manager: jumping to page " ..
             tostring(target_page) .. " via percentage fallback (" .. tostring(remote_percent) .. "%)")
@@ -646,9 +640,6 @@ function Manager:pull_all_data(ui, document, force_manual)
                 local remote_percent = remote_data.progressPercent or remote_data.progress_percent
                 if remote_percent and tonumber(remote_percent) then
                     remote_percent = tonumber(remote_percent)
-                    if remote_percent <= 1 and remote_percent > 0 then
-                        remote_percent = remote_percent * 100
-                    end
                 end
                 local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or
                     self.ui
