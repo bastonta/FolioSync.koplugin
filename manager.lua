@@ -430,7 +430,7 @@ function Manager:sync_progress(ui, document, is_silent)
             if should_push then
                 self.api:update_progress(book_id, location, percent, function(push_ok)
                     if push_ok and not is_silent then
-                        utils.show_msg(T(_("Progress synced to Folio (%1%%)"), math.floor(percent)))
+                        utils.show_msg(T(_("Progress synced to Folio (%1%)"), math.floor(percent)))
                     end
                 end)
             end
@@ -957,7 +957,7 @@ function Manager:push_all_data(ui, document, force_manual)
             self:sync_bookmarks(ui, document, false)
             if force_manual then
                 if push_prog_ok then
-                    utils.show_msg(T(_("All document data sent to Folio (%1%%)!"), math.floor(percent)))
+                    utils.show_msg(T(_("All document data sent to Folio (%1%)!"), math.floor(percent)))
                 else
                     utils.show_msg(_("Failed to push progress to Folio."))
                 end
@@ -1105,7 +1105,7 @@ function Manager:pull_all_data(ui, document, force_manual)
                 self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc)
 
                 if remote_percent then
-                    progress_msg = T(_("Progress: %1%%"), math.floor(remote_percent))
+                    progress_msg = T(_("Progress: %1%"), math.floor(remote_percent))
                 end
             end
 

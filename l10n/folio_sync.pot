@@ -291,7 +291,7 @@ msgid "Document not matched on Folio server."
 msgstr ""
 
 #: manager.lua:155
-msgid "Progress synced to Folio (%1%%)"
+msgid "Progress synced to Folio (%1%)"
 msgstr ""
 
 #: manager.lua:167 manager.lua:230 manager.lua:277
@@ -323,7 +323,7 @@ msgid "Pushing all document data to Folio..."
 msgstr ""
 
 #: manager.lua:263
-msgid "All document data sent to Folio (%1%%)!"
+msgid "All document data sent to Folio (%1%)!"
 msgstr ""
 
 #: manager.lua:265
@@ -335,7 +335,7 @@ msgid "Fetching document data from Folio..."
 msgstr ""
 
 #: manager.lua:318
-msgid "Progress: %1%%"
+msgid "Progress: %1%"
 msgstr ""
 
 #: manager.lua:350
