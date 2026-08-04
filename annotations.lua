@@ -227,4 +227,24 @@ function M.is_bookmark(item)
     return item and (item.pos0 or item.page) and not M.is_annotation(item)
 end
 
+-- Compare whether two bookmarks match by location / position or folio_id
+function M.is_same_bookmark(item_a, item_b)
+    if not item_a or not item_b then return false end
+    if item_a.folio_id and item_b.folio_id and item_a.folio_id == item_b.folio_id then
+        return true
+    end
+    local pos_a = type(item_a.pos0) == "string" and item_a.pos0 or item_a.location or item_a.locationStart or
+        (type(item_a.page) == "string" and item_a.page) or
+        (type(item_a.page) == "number" and string.format("page_%d", item_a.page)) or ""
+    local pos_b = type(item_b.pos0) == "string" and item_b.pos0 or item_b.location or item_b.locationStart or
+        (type(item_b.page) == "string" and item_b.page) or
+        (type(item_b.page) == "number" and string.format("page_%d", item_b.page)) or ""
+
+    if pos_a ~= "" and pos_a == pos_b then
+        return true
+    end
+
+    return false
+end
+
 return M

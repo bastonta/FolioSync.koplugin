@@ -43,6 +43,48 @@ describe("FolioSync Annotation Conversion", function()
         assert.is_equal("12345678-1234-1234-1234-123456789abc", kr_item.folio_id)
     end)
 
+    it("correctly identifies same bookmark by location or folio_id", function()
+        local bm1 = { page = 15, pos0 = "page_15", text = "Chapter 2" }
+        local bm2 = { page = 15, pos0 = "page_15", text = "Different title" }
+        local bm3 = { page = 20, pos0 = "page_20", text = "Chapter 2" }
+
+        assert.is_true(annotations.is_same_bookmark(bm1, bm2))
+        assert.is_false(annotations.is_same_bookmark(bm1, bm3))
+
+        local bm_with_id1 = { pos0 = "page_5", folio_id = "uuid-123" }
+        local bm_with_id2 = { pos0 = "page_10", folio_id = "uuid-123" }
+        assert.is_true(annotations.is_same_bookmark(bm_with_id1, bm_with_id2))
+    end)
+
+    it("manages sync state persistence", function()
+        package.loaded["datastorage"] = {
+            getSettingsDir = function() return "/tmp" end
+        }
+        local Manager = require("manager")
+        local mgr = setmetatable({}, { __index = Manager })
+        local book_id = "test_book_123"
+
+        local initial_state = mgr:load_sync_state(book_id)
+        assert.is_false(initial_state.has_synced_annos)
+        assert.is_false(initial_state.has_synced_bms)
+
+        local new_state = {
+            has_synced_annos = true,
+            has_synced_bms = true,
+            annotations = { ["a1"] = { pos0 = "page_1", text = "hello" } },
+            bookmarks = { ["b1"] = { pos0 = "page_5", text = "bookmark" } },
+        }
+        assert.is_true(mgr:save_sync_state(book_id, new_state))
+
+        local reloaded = mgr:load_sync_state(book_id)
+        assert.is_true(reloaded.has_synced_annos)
+        assert.is_true(reloaded.has_synced_bms)
+        assert.is_equal("page_1", reloaded.annotations["a1"].pos0)
+        assert.is_equal("page_5", reloaded.bookmarks["b1"].pos0)
+
+        os.remove("/tmp/folio_sync_state_test_book_123.json")
+    end)
+
     it("sanitizes filenames correctly for downloading books", function()
         local clean1 = utils.sanitize_filename("Great Book: Edition 1 / Volume 2")
         assert.is_equal("Great Book_ Edition 1 _ Volume 2", clean1)

@@ -18,6 +18,108 @@ function Manager:new(plugin_instance)
     return o
 end
 
+-- Get file path for sync state snapshot JSON (fallback global location)
+function Manager:get_sync_state_filepath(book_id)
+    local DataStorage = require("datastorage")
+    local dir = DataStorage:getSettingsDir()
+    return string.format("%s/folio_sync_state_%s.json", dir, tostring(book_id))
+end
+
+-- Load sync state snapshot JSON for a book from docsettings / .sdr folder / fallback
+function Manager:load_sync_state(book_id, docsettings, file_path)
+    -- 1. Try docsettings first (stored inside <book>.sdr/metadata.<ext>.lua)
+    if docsettings and docsettings.readSetting then
+        local st = docsettings:readSetting("folio_sync_state")
+        if st and type(st) == "table" then
+            st.annotations = st.annotations or {}
+            st.bookmarks = st.bookmarks or {}
+            return st
+        end
+    end
+
+    -- 2. Try sidecar .sdr directory directly if file_path is available
+    if file_path and file_path ~= "" then
+        local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
+        if sdr_dir then
+            local sdr_path = sdr_dir .. "/folio_sync_state.json"
+            local f = io.open(sdr_path, "r")
+            if f then
+                local content = f:read("*a")
+                f:close()
+                if content and content ~= "" then
+                    local json = require("json")
+                    local ok, data = pcall(json.decode, content)
+                    if ok and type(data) == "table" then
+                        data.annotations = data.annotations or {}
+                        data.bookmarks = data.bookmarks or {}
+                        return data
+                    end
+                end
+            end
+        end
+    end
+
+    -- 3. Fallback to global settings dir
+    local path = self:get_sync_state_filepath(book_id)
+    local f = io.open(path, "r")
+    if not f then
+        return { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {} }
+    end
+    local content = f:read("*a")
+    f:close()
+    if not content or content == "" then
+        return { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {} }
+    end
+    local json = require("json")
+    local ok, data = pcall(json.decode, content)
+    if ok and type(data) == "table" then
+        data.annotations = data.annotations or {}
+        data.bookmarks = data.bookmarks or {}
+        return data
+    end
+    return { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {} }
+end
+
+-- Save sync state snapshot JSON for a book into docsettings / .sdr folder / fallback
+function Manager:save_sync_state(book_id, state, docsettings, file_path)
+    -- 1. Save into docsettings (<book>.sdr/metadata.<ext>.lua)
+    if docsettings and docsettings.saveSetting then
+        docsettings:saveSetting("folio_sync_state", state)
+    end
+
+    -- 2. Save into .sdr folder if file_path is available
+    if file_path and file_path ~= "" then
+        local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
+        if sdr_dir then
+            local json = require("json")
+            local ok, encoded = pcall(json.encode, state)
+            if ok and encoded then
+                pcall(function()
+                    local lfs_mod = package.loaded["lfs"] or package.loaded["libs/libkoreader-lfs"]
+                    if lfs_mod and lfs_mod.mkdir then lfs_mod.mkdir(sdr_dir) end
+                end)
+                local sdr_path = sdr_dir .. "/folio_sync_state.json"
+                local f = io.open(sdr_path, "w")
+                if f then
+                    f:write(encoded)
+                    f:close()
+                end
+            end
+        end
+    end
+
+    -- 3. Also save to global settings dir for fallback
+    local path = self:get_sync_state_filepath(book_id)
+    local json = require("json")
+    local ok, encoded = pcall(json.encode, state)
+    if not ok or not encoded then return false end
+    local f = io.open(path, "w")
+    if not f then return false end
+    f:write(encoded)
+    f:close()
+    return true
+end
+
 -- Compute SHA-256 hash of a file (matches Folio server algorithm)
 function Manager:compute_file_hash(file_path)
     local sha2 = nil
@@ -336,12 +438,13 @@ function Manager:sync_progress(ui, document, is_silent)
     end)
 end
 
--- Synchronize annotations for current document
-function Manager:sync_annotations(ui, document, force_manual)
+-- Synchronize annotations for current document (State-Aware 2-Way Sync)
+function Manager:sync_annotations(ui, document, force_manual, callback)
     if not self.api:has_auth() then
         if force_manual then
             utils.show_msg(_("Please set API Key in settings."))
         end
+        if callback then callback(false) end
         return
     end
 
@@ -350,6 +453,7 @@ function Manager:sync_annotations(ui, document, force_manual)
         if force_manual then
             utils.show_msg(_("No active document open."))
         end
+        if callback then callback(false) end
         return
     end
 
@@ -358,6 +462,7 @@ function Manager:sync_annotations(ui, document, force_manual)
             if force_manual then
                 utils.show_msg(_("Book not found in Folio library."))
             end
+            if callback then callback(false) end
             return
         end
 
@@ -365,99 +470,449 @@ function Manager:sync_annotations(ui, document, force_manual)
             utils.show_msg(_("Syncing annotations with Folio..."))
         end
 
-        -- 1. Fetch remote annotations
         self.api:list_annotations(book_id, function(success, remote_annos)
             if not success or not remote_annos then
                 if force_manual then
                     utils.show_msg(_("Failed to fetch remote annotations."))
                 end
+                if callback then callback(false) end
                 return
             end
 
-            -- 2. Read local annotations from KOReader docsettings
             local docsettings = info.docsettings
             local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
             local target_doc = info.document or (target_ui and target_ui.document) or document
             local raw_items = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
-            local local_annos = {}
 
-            -- Sanitize pre-existing local annotations and filter only text highlights/annotations
             for _, l_item in ipairs(raw_items) do
                 annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
-                if annotations_helper.is_annotation(l_item) then
-                    table.insert(local_annos, l_item)
+            end
+
+            local state = self:load_sync_state(book_id, docsettings, info.file_path)
+            local modified_raw = false
+            local state_annos = state.annotations or {}
+
+            if not state.has_synced_annos then
+                -- INITIAL SYNC: Safe Merge
+                for _, l_item in ipairs(raw_items) do
+                    if annotations_helper.is_annotation(l_item) then
+                        local found = false
+                        for _, r_item in ipairs(remote_annos) do
+                            if annotations_helper.is_same_annotation(l_item, r_item) then
+                                l_item.folio_id = r_item.id or l_item.folio_id
+                                found = true
+                                break
+                            end
+                        end
+                        if not found then
+                            local folio_annot = annotations_helper.koreader_to_folio_annotation(l_item)
+                            if folio_annot then
+                                self.api:create_annotation(book_id, folio_annot, function(c_ok, c_data)
+                                    if c_ok and c_data and c_data.id then
+                                        l_item.folio_id = c_data.id
+                                    end
+                                end)
+                            end
+                        end
+                    end
+                end
+
+                for _, r_item in ipairs(remote_annos) do
+                    local converted = annotations_helper.folio_to_koreader_annotation(r_item, target_doc)
+                    local found = false
+                    for _, l_item in ipairs(raw_items) do
+                        if annotations_helper.is_annotation(l_item) and (annotations_helper.is_same_annotation(l_item, r_item) or annotations_helper.is_same_annotation(l_item, converted)) then
+                            found = true
+                            break
+                        end
+                    end
+                    if not found and converted then
+                        table.insert(raw_items, converted)
+                        modified_raw = true
+                    end
+                end
+
+                state.has_synced_annos = true
+            else
+                -- SUBSEQUENT SYNC: State-aware 2-Way Sync (Local & Remote Deletions)
+                -- 1. Local Deletions
+                local snap_keys = {}
+                for key, _ in pairs(state_annos) do
+                    table.insert(snap_keys, key)
+                end
+
+                for _, key in ipairs(snap_keys) do
+                    local snap_item = state_annos[key]
+                    local found_local = false
+                    for _, l_item in ipairs(raw_items) do
+                        if annotations_helper.is_annotation(l_item) and annotations_helper.is_same_annotation(l_item, snap_item) then
+                            found_local = true
+                            break
+                        end
+                    end
+                    if not found_local then
+                        local fid = snap_item.folio_id
+                        if not fid then
+                            for _, r_item in ipairs(remote_annos) do
+                                if annotations_helper.is_same_annotation(snap_item, r_item) then
+                                    fid = r_item.id
+                                    break
+                                end
+                            end
+                        end
+                        if fid then
+                            self.api:delete_annotation(book_id, fid)
+                        end
+                        state_annos[key] = nil
+                    end
+                end
+
+                -- 2. Remote Deletions
+                snap_keys = {}
+                for key, _ in pairs(state_annos) do
+                    table.insert(snap_keys, key)
+                end
+
+                for _, key in ipairs(snap_keys) do
+                    local snap_item = state_annos[key]
+                    local found_remote = false
+                    for _, r_item in ipairs(remote_annos) do
+                        if annotations_helper.is_same_annotation(snap_item, r_item) then
+                            found_remote = true
+                            break
+                        end
+                    end
+                    if not found_remote then
+                        for idx = #raw_items, 1, -1 do
+                            local l_item = raw_items[idx]
+                            if annotations_helper.is_annotation(l_item) and annotations_helper.is_same_annotation(l_item, snap_item) then
+                                table.remove(raw_items, idx)
+                                modified_raw = true
+                                break
+                            end
+                        end
+                        state_annos[key] = nil
+                    end
+                end
+
+                -- 3. New local items -> push
+                for _, l_item in ipairs(raw_items) do
+                    if annotations_helper.is_annotation(l_item) then
+                        local in_state = false
+                        for _, snap in pairs(state_annos) do
+                            if annotations_helper.is_same_annotation(l_item, snap) then
+                                in_state = true
+                                break
+                            end
+                        end
+                        local in_remote = false
+                        for _, r_item in ipairs(remote_annos) do
+                            if annotations_helper.is_same_annotation(l_item, r_item) then
+                                l_item.folio_id = r_item.id or l_item.folio_id
+                                in_remote = true
+                                break
+                            end
+                        end
+                        if not in_state and not in_remote then
+                            local folio_annot = annotations_helper.koreader_to_folio_annotation(l_item)
+                            if folio_annot then
+                                self.api:create_annotation(book_id, folio_annot, function(c_ok, c_data)
+                                    if c_ok and c_data and c_data.id then
+                                        l_item.folio_id = c_data.id
+                                    end
+                                end)
+                            end
+                        end
+                    end
+                end
+
+                -- 4. New remote items -> pull
+                for _, r_item in ipairs(remote_annos) do
+                    local converted = annotations_helper.folio_to_koreader_annotation(r_item, target_doc)
+                    local in_state = false
+                    for _, snap in pairs(state_annos) do
+                        if annotations_helper.is_same_annotation(converted, snap) or (snap.folio_id and r_item.id and snap.folio_id == r_item.id) then
+                            in_state = true
+                            break
+                        end
+                    end
+                    local in_local = false
+                    for _, l_item in ipairs(raw_items) do
+                        if annotations_helper.is_annotation(l_item) and (annotations_helper.is_same_annotation(l_item, r_item) or annotations_helper.is_same_annotation(l_item, converted)) then
+                            l_item.folio_id = r_item.id or l_item.folio_id
+                            in_local = true
+                            break
+                        end
+                    end
+                    if not in_state and not in_local and converted then
+                        table.insert(raw_items, converted)
+                        modified_raw = true
+                    end
                 end
             end
 
-            -- 3. Merge: Push local items that are missing on remote
-            for _, l_item in ipairs(local_annos) do
-                local found = false
-                for _, r_item in ipairs(remote_annos) do
-                    if annotations_helper.is_same_annotation(l_item, r_item) then
-                        found = true
-                        break
+            -- Update state snapshot with current active items
+            local new_state_annos = {}
+            for idx, l_item in ipairs(raw_items) do
+                if annotations_helper.is_annotation(l_item) then
+                    local key = l_item.folio_id or l_item.pos0 or string.format("idx_%d", idx)
+                    new_state_annos[key] = {
+                        folio_id = l_item.folio_id,
+                        pos0 = l_item.pos0,
+                        pos1 = l_item.pos1,
+                        text = l_item.text,
+                        note = l_item.note,
+                    }
+                end
+            end
+            state.annotations = new_state_annos
+            self:save_sync_state(book_id, state, docsettings, info.file_path)
+
+            if modified_raw and docsettings and docsettings.saveSetting then
+                docsettings:saveSetting("annotations", raw_items)
+                if target_ui and target_ui.annotation then
+                    target_ui.annotation.annotations = raw_items
+                    if target_ui.annotation.onSaveSettings then
+                        target_ui.annotation:onSaveSettings()
                     end
                 end
-                if not found then
-                    local folio_annot = annotations_helper.koreader_to_folio_annotation(l_item)
-                    if folio_annot then
-                        self.api:create_annotation(book_id, folio_annot)
-                    end
-                end
+                UIManager:broadcastEvent(Event:new("AnnotationsModified", raw_items))
             end
 
             if force_manual then
                 utils.show_msg(_("Annotations synchronized with Folio!"))
             end
+
+            if callback then callback(true) end
         end)
     end)
 end
 
--- Synchronize bookmarks (page dog-ears) for current document
-function Manager:sync_bookmarks(ui, document, force_manual)
-    if not self.api:has_auth() then return end
+-- Synchronize bookmarks for current document (State-Aware 2-Way Sync)
+function Manager:sync_bookmarks(ui, document, force_manual, callback)
+    if not self.api:has_auth() then
+        if callback then callback(false) end
+        return
+    end
 
     local info = self:get_doc_info(ui, document)
-    if not info then return end
+    if not info then
+        if callback then callback(false) end
+        return
+    end
 
     self:resolve_book_id(ui, document, function(book_id)
-        if not book_id then return end
+        if not book_id then
+            if callback then callback(false) end
+            return
+        end
 
         self.api:list_bookmarks(book_id, function(success, remote_bms)
-            if not success or not remote_bms then return end
+            if not success or not remote_bms then
+                if callback then callback(false) end
+                return
+            end
 
             local docsettings = info.docsettings
             local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
             local target_doc = info.document or (target_ui and target_ui.document) or document
             local raw_items = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
-            local legacy_bms = docsettings and docsettings.readSetting and docsettings:readSetting("bookmark") or {}
-            local local_bms = {}
 
             for _, l_item in ipairs(raw_items) do
                 annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
-                if annotations_helper.is_bookmark(l_item) then
-                    table.insert(local_bms, l_item)
-                end
-            end
-            for _, l_bm in ipairs(legacy_bms) do
-                table.insert(local_bms, l_bm)
             end
 
-            for _, l_bm in ipairs(local_bms) do
-                local found = false
-                for _, r_bm in ipairs(remote_bms) do
-                    if annotations_helper.is_same_annotation(l_bm, r_bm) then
-                        found = true
-                        break
+            local state = self:load_sync_state(book_id, docsettings, info.file_path)
+            local modified_raw = false
+            local state_bms = state.bookmarks or {}
+
+            if not state.has_synced_bms then
+                -- INITIAL SYNC: Safe Merge
+                for _, l_item in ipairs(raw_items) do
+                    if annotations_helper.is_bookmark(l_item) then
+                        local found = false
+                        for _, r_bm in ipairs(remote_bms) do
+                            if annotations_helper.is_same_bookmark(l_item, r_bm) then
+                                l_item.folio_id = r_bm.id or l_item.folio_id
+                                found = true
+                                break
+                            end
+                        end
+                        if not found then
+                            local folio_bm = annotations_helper.koreader_to_folio_bookmark(l_item)
+                            if folio_bm then
+                                self.api:create_bookmark(book_id, folio_bm, function(c_ok, c_data)
+                                    if c_ok and c_data and c_data.id then
+                                        l_item.folio_id = c_data.id
+                                    end
+                                end)
+                            end
+                        end
                     end
                 end
-                if not found then
-                    local folio_bm = annotations_helper.koreader_to_folio_bookmark(l_bm)
-                    if folio_bm then
-                        self.api:create_bookmark(book_id, folio_bm)
+
+                for _, r_bm in ipairs(remote_bms) do
+                    local converted = annotations_helper.folio_to_koreader_bookmark(r_bm)
+                    local found = false
+                    for _, l_item in ipairs(raw_items) do
+                        if annotations_helper.is_bookmark(l_item) and (annotations_helper.is_same_bookmark(l_item, r_bm) or annotations_helper.is_same_bookmark(l_item, converted)) then
+                            found = true
+                            break
+                        end
+                    end
+                    if not found and converted then
+                        table.insert(raw_items, converted)
+                        modified_raw = true
+                    end
+                end
+
+                state.has_synced_bms = true
+            else
+                -- SUBSEQUENT SYNC: State-aware 2-Way Sync (Local & Remote Deletions)
+                -- 1. Local Deletions
+                local snap_keys = {}
+                for key, _ in pairs(state_bms) do
+                    table.insert(snap_keys, key)
+                end
+
+                for _, key in ipairs(snap_keys) do
+                    local snap_bm = state_bms[key]
+                    local found_local = false
+                    for _, l_item in ipairs(raw_items) do
+                        if annotations_helper.is_bookmark(l_item) and annotations_helper.is_same_bookmark(l_item, snap_bm) then
+                            found_local = true
+                            break
+                        end
+                    end
+                    if not found_local then
+                        local fid = snap_bm.folio_id
+                        if not fid then
+                            for _, r_bm in ipairs(remote_bms) do
+                                if annotations_helper.is_same_bookmark(snap_bm, r_bm) then
+                                    fid = r_bm.id
+                                    break
+                                end
+                            end
+                        end
+                        if fid then
+                            self.api:delete_bookmark(book_id, fid)
+                        end
+                        state_bms[key] = nil
+                    end
+                end
+
+                -- 2. Remote Deletions
+                snap_keys = {}
+                for key, _ in pairs(state_bms) do
+                    table.insert(snap_keys, key)
+                end
+
+                for _, key in ipairs(snap_keys) do
+                    local snap_bm = state_bms[key]
+                    local found_remote = false
+                    for _, r_bm in ipairs(remote_bms) do
+                        if annotations_helper.is_same_bookmark(snap_bm, r_bm) then
+                            found_remote = true
+                            break
+                        end
+                    end
+                    if not found_remote then
+                        for idx = #raw_items, 1, -1 do
+                            local l_item = raw_items[idx]
+                            if annotations_helper.is_bookmark(l_item) and annotations_helper.is_same_bookmark(l_item, snap_bm) then
+                                table.remove(raw_items, idx)
+                                modified_raw = true
+                                break
+                            end
+                        end
+                        state_bms[key] = nil
+                    end
+                end
+
+                -- 3. New local bookmarks -> push
+                for _, l_item in ipairs(raw_items) do
+                    if annotations_helper.is_bookmark(l_item) then
+                        local in_state = false
+                        for _, snap in pairs(state_bms) do
+                            if annotations_helper.is_same_bookmark(l_item, snap) then
+                                in_state = true
+                                break
+                            end
+                        end
+                        local in_remote = false
+                        for _, r_bm in ipairs(remote_bms) do
+                            if annotations_helper.is_same_bookmark(l_item, r_bm) then
+                                l_item.folio_id = r_bm.id or l_item.folio_id
+                                in_remote = true
+                                break
+                            end
+                        end
+                        if not in_state and not in_remote then
+                            local folio_bm = annotations_helper.koreader_to_folio_bookmark(l_item)
+                            if folio_bm then
+                                self.api:create_bookmark(book_id, folio_bm, function(c_ok, c_data)
+                                    if c_ok and c_data and c_data.id then
+                                        l_item.folio_id = c_data.id
+                                    end
+                                end)
+                            end
+                        end
+                    end
+                end
+
+                -- 4. New remote bookmarks -> pull
+                for _, r_bm in ipairs(remote_bms) do
+                    local converted = annotations_helper.folio_to_koreader_bookmark(r_bm)
+                    local in_state = false
+                    for _, snap in pairs(state_bms) do
+                        if annotations_helper.is_same_bookmark(converted, snap) or (snap.folio_id and r_bm.id and snap.folio_id == r_bm.id) then
+                            in_state = true
+                            break
+                        end
+                    end
+                    local in_local = false
+                    for _, l_item in ipairs(raw_items) do
+                        if annotations_helper.is_bookmark(l_item) and (annotations_helper.is_same_bookmark(l_item, r_bm) or annotations_helper.is_same_bookmark(l_item, converted)) then
+                            l_item.folio_id = r_bm.id or l_item.folio_id
+                            in_local = true
+                            break
+                        end
+                    end
+                    if not in_state and not in_local and converted then
+                        table.insert(raw_items, converted)
+                        modified_raw = true
                     end
                 end
             end
+
+            -- Update state snapshot with current active items
+            local new_state_bms = {}
+            for idx, l_item in ipairs(raw_items) do
+                if annotations_helper.is_bookmark(l_item) then
+                    local key = l_item.folio_id or l_item.pos0 or string.format("idx_%d", idx)
+                    new_state_bms[key] = {
+                        folio_id = l_item.folio_id,
+                        pos0 = l_item.pos0,
+                        text = l_item.text,
+                    }
+                end
+            end
+            state.bookmarks = new_state_bms
+            self:save_sync_state(book_id, state, docsettings, info.file_path)
+
+            if modified_raw and docsettings and docsettings.saveSetting then
+                docsettings:saveSetting("annotations", raw_items)
+                if target_ui and target_ui.annotation then
+                    target_ui.annotation.annotations = raw_items
+                    if target_ui.annotation.onSaveSettings then
+                        target_ui.annotation:onSaveSettings()
+                    end
+                end
+                UIManager:broadcastEvent(Event:new("AnnotationsModified", raw_items))
+                UIManager:broadcastEvent(Event:new("BookmarksModified", raw_items))
+            end
+
+            if callback then callback(true) end
         end)
     end)
 end
@@ -494,6 +949,8 @@ function Manager:push_all_data(ui, document, force_manual)
 
         local percent = info.percent
         local location = info.location
+
+        logger.info("FolioSync Manager: local progress: " .. percent .. ", location: " .. location)
 
         self.api:update_progress(book_id, location, percent, function(push_prog_ok)
             self:sync_annotations(ui, document, false)
@@ -652,123 +1109,12 @@ function Manager:pull_all_data(ui, document, force_manual)
                 end
             end
 
-            -- 1. Pull Annotations
-            self.api:list_annotations(book_id, function(anno_ok, remote_annos)
-                local added_count = 0
-                local docsettings = info.docsettings
-                local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or
-                    self.ui
-                local target_doc = info.document or (target_ui and target_ui.document) or document
-
-                if anno_ok and remote_annos and docsettings and docsettings.readSetting then
-                    local local_annos = docsettings:readSetting("annotations") or
-                        (target_ui and target_ui.annotation and target_ui.annotation.annotations) or {}
-
-                    for _, l_item in ipairs(local_annos) do
-                        annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
-                    end
-
-                    for _, r_item in ipairs(remote_annos) do
-                        local converted = annotations_helper.folio_to_koreader_annotation(r_item, target_doc)
-                        local found_l_item = nil
-                        for _, l_item in ipairs(local_annos) do
-                            if annotations_helper.is_same_annotation(l_item, r_item) or annotations_helper.is_same_annotation(l_item, converted) then
-                                found_l_item = l_item
-                                break
-                            end
-                        end
-                        if found_l_item then
-                            found_l_item.folio_id = r_item.id or found_l_item.folio_id
-                            if converted then
-                                found_l_item.note = converted.note or found_l_item.note
-                                found_l_item.color = converted.color or found_l_item.color
-                                found_l_item.datetime_updated = converted.datetime_updated or
-                                    found_l_item.datetime_updated
-                            end
-                            annotations_helper.sanitize_koreader_annotation(found_l_item, target_doc)
-                        elseif converted then
-                            table.insert(local_annos, converted)
-                            added_count = added_count + 1
-                        end
-                    end
-
-                    if (added_count > 0 or #local_annos > 0) and docsettings.saveSetting then
-                        docsettings:saveSetting("annotations", local_annos)
-
-                        if target_ui and target_ui.annotation then
-                            target_ui.annotation.annotations = local_annos
-                            if target_ui.annotation.onSaveSettings then
-                                target_ui.annotation:onSaveSettings()
-                            end
-                        end
-
-                        UIManager:broadcastEvent(Event:new("AnnotationsModified", local_annos))
-
-                        if target_doc then
-                            if not target_doc.is_pdf then
-                                if target_doc.render then target_doc:render() end
-                                if target_ui and target_ui.view and target_ui.view.recalculate then
-                                    target_ui.view
-                                        :recalculate()
-                                end
-                                if target_ui and target_ui.view and target_ui.view.dialog then
-                                    UIManager:setDirty(
-                                        target_ui.view.dialog, "partial")
-                                end
-                            else
-                                if target_doc.resetTileCacheValidity then target_doc:resetTileCacheValidity() end
-                                if target_ui and target_ui.view and target_ui.view.dialog then
-                                    UIManager:setDirty(
-                                        target_ui.view.dialog, "ui")
-                                end
-                            end
-                        end
-                    end
-                end
-
-                -- 2. Pull Bookmarks
-                self.api:list_bookmarks(book_id, function(bm_ok, remote_bms)
-                    local bm_added = 0
-                    if bm_ok and remote_bms and docsettings and docsettings.readSetting then
-                        local local_bms = docsettings:readSetting("bookmark") or
-                            (target_ui and target_ui.bookmark and target_ui.bookmark.bookmark) or {}
-
-                        for _, r_bm in ipairs(remote_bms) do
-                            local converted_bm = annotations_helper.folio_to_koreader_bookmark(r_bm)
-                            local found = false
-                            for _, l_bm in ipairs(local_bms) do
-                                if annotations_helper.is_same_annotation(l_bm, r_bm) or annotations_helper.is_same_annotation(l_bm, converted_bm) then
-                                    found = true
-                                    break
-                                end
-                            end
-                            if not found and converted_bm then
-                                table.insert(local_bms, converted_bm)
-                                bm_added = bm_added + 1
-                            end
-                        end
-
-                        if (bm_added > 0 or #local_bms > 0) and docsettings.saveSetting then
-                            docsettings:saveSetting("bookmark", local_bms)
-                            if target_ui and target_ui.bookmark then
-                                target_ui.bookmark.bookmark = local_bms
-                                if target_ui.bookmark.onSaveSettings then
-                                    target_ui.bookmark:onSaveSettings()
-                                end
-                            end
-                            UIManager:broadcastEvent(Event:new("BookmarksModified", local_bms))
-                        end
-                    end
-
+            -- 2-Way Sync Annotations & Bookmarks
+            self:sync_annotations(ui, document, false, function()
+                self:sync_bookmarks(ui, document, false, function()
                     if force_manual then
-                        local total_added = added_count + bm_added
-                        if total_added > 0 then
-                            utils.show_msg(T(_("Fetched remote data: %1 (%2 new items)"),
-                                progress_msg ~= "" and progress_msg or _("Progress updated"), total_added))
-                        else
-                            utils.show_msg(T(_("Fetched remote data: %1"),
-                                progress_msg ~= "" and progress_msg or _("Up to date")))
-                        end
+                        utils.show_msg(T(_("Fetched remote data: %1"),
+                            progress_msg ~= "" and progress_msg or _("Up to date")))
                     end
                 end)
             end)
