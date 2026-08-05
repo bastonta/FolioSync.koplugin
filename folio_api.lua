@@ -49,7 +49,7 @@ local function get_http_client()
 
         if ok_su and socketutil then
             if socketutil.set_timeout then
-                socketutil.set_timeout(15)
+                socketutil:set_timeout(15)
             end
         end
 
@@ -57,7 +57,7 @@ local function get_http_client()
 
         if ok_su and socketutil then
             if socketutil.reset_timeout then
-                socketutil.reset_timeout()
+                socketutil:reset_timeout()
             end
         end
 
@@ -423,7 +423,7 @@ end
 function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback)
     local base_url = self:get_server_url()
     local url = base_url ..
-    "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id) .. "?format=xpointer"
+        "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id) .. "?format=xpointer"
 
     local payload = json.encode({
         locationStart = annotation.locationStart or "",

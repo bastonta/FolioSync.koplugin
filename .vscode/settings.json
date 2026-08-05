@@ -20,6 +20,7 @@
     "sockethttp",
     "socketutil",
     "uimanager",
+    "urlencode",
     "widgetcontainer",
     "XGETTEXT",
     "xpointer"
