@@ -423,7 +423,7 @@ end
 function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback)
     local base_url = self:get_server_url()
     local url = base_url ..
-    "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id) .. "?format=xpointer"
+        "/books/" .. tostring(book_id) .. "/annotations/" .. tostring(annotation_id) .. "?format=xpointer"
 
     local payload = json.encode({
         locationStart = annotation.locationStart or "",
