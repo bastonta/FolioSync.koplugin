@@ -300,9 +300,22 @@ function FolioBrowser:start_download(book, download_dir)
         ok_text = file_exists and _("Redownload") or _("Download"),
         cancel_text = _("Cancel"),
         ok_callback = function()
-            -- Ensure directory exists
-            pcall(require, "lfs")
-            os.execute("mkdir -p \"" .. download_dir .. "\"")
+            -- Ensure directory exists safely
+            local ok_lfs, lfs_mod = pcall(require, "lfs")
+            if ok_lfs and lfs_mod and lfs_mod.mkdir then
+                local path_acc = ""
+                for part in download_dir:gmatch("[^/\\]+") do
+                    if download_dir:sub(1, 1) == "/" and path_acc == "" then
+                        path_acc = "/" .. part
+                    else
+                        path_acc = path_acc == "" and part or (path_acc .. "/" .. part)
+                    end
+                    lfs_mod.mkdir(path_acc)
+                end
+            else
+                local clean_dir = download_dir:gsub('["`$\\]', "\\%1")
+                os.execute("mkdir -p \"" .. clean_dir .. "\"")
+            end
 
             UIManager:show(InfoMessage:new {
                 text = T(_("Downloading '%1'..."), book_title),

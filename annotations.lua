@@ -156,7 +156,7 @@ function M.folio_to_koreader_annotation(folio_item, target_doc)
         note = note ~= "" and note or nil,
         page = locationStart ~= "" and locationStart or "page_1",
         pos0 = locationStart ~= "" and locationStart or "page_1",
-        pos1 = locationEnd ~= "" and locationEnd or "",
+        pos1 = locationEnd ~= "" and locationEnd or (text ~= "" and (locationStart ~= "" and locationStart or "page_1") or ""),
         text = text ~= "" and text or nil,
         folio_id = folio_item.id,
     }

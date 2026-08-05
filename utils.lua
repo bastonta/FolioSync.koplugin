@@ -39,9 +39,11 @@ end
 function M.insert_after_statistics(key)
     local pos = 1
     for index, value in ipairs(reader_order.tools) do
+        if value == key then
+            return
+        end
         if value == "statistics" then
             pos = index + 1
-            break
         end
     end
     table.insert(reader_order.tools, pos, key)

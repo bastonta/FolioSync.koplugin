@@ -4,6 +4,15 @@ local utils = require("utils")
 
 local FolioAPI = {}
 
+local function urlencode(str)
+    if not str then return "" end
+    str = string.gsub(str, "\r?\n", "\r\n")
+    str = string.gsub(str, "([^%w%-%_%.%~])", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end)
+    return str
+end
+
 local function get_http_client()
     local ok_http, sockethttp = pcall(require, "socket.http")
     local ok_ltn12, ltn12 = pcall(require, "ltn12")
@@ -39,13 +48,17 @@ local function get_http_client()
         end
 
         if ok_su and socketutil then
-            socketutil:set_timeout()
+            if socketutil.set_timeout then
+                socketutil.set_timeout(15)
+            end
         end
 
         local res, code, resp_headers, status = sockethttp.request(request_params)
 
         if ok_su and socketutil then
-            socketutil:reset_timeout()
+            if socketutil.reset_timeout then
+                socketutil.reset_timeout()
+            end
         end
 
         if res == nil then
@@ -203,7 +216,7 @@ function FolioAPI:list_books(page, limit, search, callback)
 
     local query = string.format("page=%d&limit=%d", page, limit)
     if search and search ~= "" then
-        query = query .. "&search=" .. string.gsub(search, " ", "%%20")
+        query = query .. "&search=" .. urlencode(search)
     end
 
     local url = base_url .. "/books?" .. query

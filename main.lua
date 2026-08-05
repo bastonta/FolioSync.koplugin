@@ -96,7 +96,7 @@ function FolioSync:load_settings()
         data.download_dir = "/sdcard/books/FolioSync"
     end
     if data.auto_progress_sync == nil then
-        data.auto_progress_sync = true
+        data.auto_progress_sync = false
     end
     return data
 end
@@ -107,7 +107,11 @@ end
 
 function FolioSync:onPageUpdate(page_number)
     if self.settings.auto_progress_sync and self.ui and self.ui.document then
-        self.manager:sync_progress(self.ui, self.ui.document, true)
+        local now = os.time()
+        if not self._last_progress_sync_time or (now - self._last_progress_sync_time) >= 5 then
+            self._last_progress_sync_time = now
+            self.manager:sync_progress(self.ui, self.ui.document, true)
+        end
     end
 end
 

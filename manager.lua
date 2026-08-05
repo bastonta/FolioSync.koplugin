@@ -286,6 +286,10 @@ function Manager:get_doc_info(ui, document)
     if not title then
         title = utils.get_file_basename(file_path):gsub("%.%w+$", "")
     end
+    if type(location) == "table" then
+        location = location.xpointer or location.location or (location.page and string.format("page_%d", location.page)) or
+        tostring(location)
+    end
     if not location and current_page then
         location = string.format("page_%d", current_page)
     end
@@ -298,6 +302,7 @@ function Manager:get_doc_info(ui, document)
 
     return {
         file = file_path,
+        file_path = file_path,
         title = title,
         total_pages = total_pages,
         current_page = current_page,
@@ -488,7 +493,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
             end
 
-            local state = self:load_sync_state(book_id, docsettings, info.file_path)
+            local state = self:load_sync_state(book_id, docsettings, info.file or info.file_path)
             local modified_raw = false
             local state_annos = state.annotations or {}
 
@@ -510,6 +515,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                                 self.api:create_annotation(book_id, folio_annot, function(c_ok, c_data)
                                     if c_ok and c_data and c_data.id then
                                         l_item.folio_id = c_data.id
+                                        modified_raw = true
                                     end
                                 end)
                             end
@@ -619,6 +625,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                                 self.api:create_annotation(book_id, folio_annot, function(c_ok, c_data)
                                     if c_ok and c_data and c_data.id then
                                         l_item.folio_id = c_data.id
+                                        modified_raw = true
                                     end
                                 end)
                             end
@@ -666,10 +673,15 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 end
             end
             state.annotations = new_state_annos
-            self:save_sync_state(book_id, state, docsettings, info.file_path)
+            self:save_sync_state(book_id, state, docsettings, info.file or info.file_path)
 
             if modified_raw and docsettings and docsettings.saveSetting then
                 docsettings:saveSetting("annotations", raw_items)
+                if docsettings.flush then
+                    docsettings:flush()
+                elseif docsettings.save then
+                    docsettings:save()
+                end
                 if target_ui and target_ui.annotation then
                     target_ui.annotation.annotations = raw_items
                     if target_ui.annotation.onSaveSettings then
@@ -722,7 +734,7 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                 annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
             end
 
-            local state = self:load_sync_state(book_id, docsettings, info.file_path)
+            local state = self:load_sync_state(book_id, docsettings, info.file or info.file_path)
             local modified_raw = false
             local state_bms = state.bookmarks or {}
 
@@ -744,6 +756,7 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                                 self.api:create_bookmark(book_id, folio_bm, function(c_ok, c_data)
                                     if c_ok and c_data and c_data.id then
                                         l_item.folio_id = c_data.id
+                                        modified_raw = true
                                     end
                                 end)
                             end
@@ -853,6 +866,7 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                                 self.api:create_bookmark(book_id, folio_bm, function(c_ok, c_data)
                                     if c_ok and c_data and c_data.id then
                                         l_item.folio_id = c_data.id
+                                        modified_raw = true
                                     end
                                 end)
                             end
@@ -898,10 +912,15 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                 end
             end
             state.bookmarks = new_state_bms
-            self:save_sync_state(book_id, state, docsettings, info.file_path)
+            self:save_sync_state(book_id, state, docsettings, info.file or info.file_path)
 
             if modified_raw and docsettings and docsettings.saveSetting then
                 docsettings:saveSetting("annotations", raw_items)
+                if docsettings.flush then
+                    docsettings:flush()
+                elseif docsettings.save then
+                    docsettings:save()
+                end
                 if target_ui and target_ui.annotation then
                     target_ui.annotation.annotations = raw_items
                     if target_ui.annotation.onSaveSettings then
@@ -1046,7 +1065,7 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
         end
     end
 
-    -- 4. Fallback: navigate by percentage (0..1 or 0..100)
+    -- 4. Fallback: navigate by percentage (0..100)
     if remote_percent and total_pages and total_pages > 1 then
         local pct = tonumber(remote_percent) or 0
         local target_page = math.max(1, math.min(total_pages, math.floor((pct / 100) * total_pages + 0.5)))
