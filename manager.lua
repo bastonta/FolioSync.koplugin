@@ -18,58 +18,22 @@ function Manager:new(plugin_instance)
     return o
 end
 
--- Get file path for sync state snapshot JSON (fallback global location)
-function Manager:get_sync_state_filepath(book_id)
-    local DataStorage = require("datastorage")
-    local dir = DataStorage:getSettingsDir()
-    return string.format("%s/folio_sync_state_%s.json", dir, tostring(book_id))
-end
+-- Load sync state snapshot from <book>.sdr/folio_sync_state.json
+function Manager:load_sync_state(file_path)
+    local empty = { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {} }
+    if not file_path or file_path == "" then return empty end
 
--- Load sync state snapshot JSON for a book from docsettings / .sdr folder / fallback
-function Manager:load_sync_state(book_id, docsettings, file_path)
-    -- 1. Try docsettings first (stored inside <book>.sdr/metadata.<ext>.lua)
-    if docsettings and docsettings.readSetting then
-        local st = docsettings:readSetting("folio_sync_state")
-        if st and type(st) == "table" then
-            st.annotations = st.annotations or {}
-            st.bookmarks = st.bookmarks or {}
-            return st
-        end
-    end
+    local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
+    if not sdr_dir then return empty end
 
-    -- 2. Try sidecar .sdr directory directly if file_path is available
-    if file_path and file_path ~= "" then
-        local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
-        if sdr_dir then
-            local sdr_path = sdr_dir .. "/folio_sync_state.json"
-            local f = io.open(sdr_path, "r")
-            if f then
-                local content = f:read("*a")
-                f:close()
-                if content and content ~= "" then
-                    local json = require("json")
-                    local ok, data = pcall(json.decode, content)
-                    if ok and type(data) == "table" then
-                        data.annotations = data.annotations or {}
-                        data.bookmarks = data.bookmarks or {}
-                        return data
-                    end
-                end
-            end
-        end
-    end
+    local sdr_path = sdr_dir .. "/folio_sync_state.json"
+    local f = io.open(sdr_path, "r")
+    if not f then return empty end
 
-    -- 3. Fallback to global settings dir
-    local path = self:get_sync_state_filepath(book_id)
-    local f = io.open(path, "r")
-    if not f then
-        return { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {} }
-    end
     local content = f:read("*a")
     f:close()
-    if not content or content == "" then
-        return { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {} }
-    end
+    if not content or content == "" then return empty end
+
     local json = require("json")
     local ok, data = pcall(json.decode, content)
     if ok and type(data) == "table" then
@@ -77,47 +41,40 @@ function Manager:load_sync_state(book_id, docsettings, file_path)
         data.bookmarks = data.bookmarks or {}
         return data
     end
-    return { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {} }
+    return empty
 end
 
--- Save sync state snapshot JSON for a book into docsettings / .sdr folder / fallback
-function Manager:save_sync_state(book_id, state, docsettings, file_path)
-    -- 1. Save into docsettings (<book>.sdr/metadata.<ext>.lua)
-    if docsettings and docsettings.saveSetting then
-        docsettings:saveSetting("folio_sync_state", state)
-    end
+-- Save sync state snapshot to <book>.sdr/folio_sync_state.json
+function Manager:save_sync_state(state, file_path)
+    if not file_path or file_path == "" then return false end
+    local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
+    if not sdr_dir then return false end
 
-    -- 2. Save into .sdr folder if file_path is available
-    if file_path and file_path ~= "" then
-        local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
-        if sdr_dir then
-            local json = require("json")
-            local ok, encoded = pcall(json.encode, state)
-            if ok and encoded then
-                pcall(function()
-                    local lfs_mod = package.loaded["lfs"] or package.loaded["libs/libkoreader-lfs"]
-                    if lfs_mod and lfs_mod.mkdir then lfs_mod.mkdir(sdr_dir) end
-                end)
-                local sdr_path = sdr_dir .. "/folio_sync_state.json"
-                local f = io.open(sdr_path, "w")
-                if f then
-                    f:write(encoded)
-                    f:close()
-                end
-            end
-        end
-    end
-
-    -- 3. Also save to global settings dir for fallback
-    local path = self:get_sync_state_filepath(book_id)
     local json = require("json")
     local ok, encoded = pcall(json.encode, state)
     if not ok or not encoded then return false end
-    local f = io.open(path, "w")
+
+    pcall(function()
+        local lfs_mod = package.loaded["lfs"] or package.loaded["libs/libkoreader-lfs"]
+        if lfs_mod and lfs_mod.mkdir then lfs_mod.mkdir(sdr_dir) end
+    end)
+
+    local sdr_path = sdr_dir .. "/folio_sync_state.json"
+    local f = io.open(sdr_path, "w")
     if not f then return false end
     f:write(encoded)
     f:close()
     return true
+end
+
+-- Invalidate (delete) sync state JSON when folio_book_id is missing from docsettings
+function Manager:invalidate_sync_state(file_path)
+    if not file_path or file_path == "" then return end
+    local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
+    if not sdr_dir then return end
+    local sdr_path = sdr_dir .. "/folio_sync_state.json"
+    os.remove(sdr_path)
+    logger.info("FolioSync Manager: invalidated sync state for " .. file_path)
 end
 
 -- Compute SHA-256 hash of a file (matches Folio server algorithm)
@@ -348,6 +305,10 @@ function Manager:resolve_book_id(ui_or_doc, callback_or_doc, maybe_callback)
         end
     end
 
+    -- folio_book_id was not found in docsettings — metadata was deleted/reset
+    -- Invalidate sync state so next sync starts as initial merge (safe merge)
+    self:invalidate_sync_state(info.file or info.file_path)
+
     -- 2. Try to match by file hash via Folio API
     local file_hash = self:compute_file_hash(info.file)
     if file_hash then
@@ -493,7 +454,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
             end
 
-            local state = self:load_sync_state(book_id, docsettings, info.file or info.file_path)
+            local state = self:load_sync_state(info.file or info.file_path)
             local modified_raw = false
             local state_annos = state.annotations or {}
 
@@ -673,7 +634,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 end
             end
             state.annotations = new_state_annos
-            self:save_sync_state(book_id, state, docsettings, info.file or info.file_path)
+            self:save_sync_state(state, info.file or info.file_path)
 
             if modified_raw and docsettings and docsettings.saveSetting then
                 docsettings:saveSetting("annotations", raw_items)
@@ -734,7 +695,7 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                 annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
             end
 
-            local state = self:load_sync_state(book_id, docsettings, info.file or info.file_path)
+            local state = self:load_sync_state(info.file or info.file_path)
             local modified_raw = false
             local state_bms = state.bookmarks or {}
 
@@ -912,7 +873,7 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                 end
             end
             state.bookmarks = new_state_bms
-            self:save_sync_state(book_id, state, docsettings, info.file or info.file_path)
+            self:save_sync_state(state, info.file or info.file_path)
 
             if modified_raw and docsettings and docsettings.saveSetting then
                 docsettings:saveSetting("annotations", raw_items)
