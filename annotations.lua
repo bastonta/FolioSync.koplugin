@@ -247,4 +247,20 @@ function M.is_same_bookmark(item_a, item_b)
     return false
 end
 
+-- Sort items in-place by pos0 position (required by KOReader for highlight rendering)
+function M.sort_by_position(items)
+    if not items or #items < 2 then return items end
+    table.sort(items, function(a, b)
+        local pos_a = type(a.pos0) == "string" and a.pos0 or ""
+        local pos_b = type(b.pos0) == "string" and b.pos0 or ""
+        if pos_a == pos_b then
+            local dt_a = a.datetime or ""
+            local dt_b = b.datetime or ""
+            return dt_a < dt_b
+        end
+        return pos_a < pos_b
+    end)
+    return items
+end
+
 return M

@@ -619,6 +619,14 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 end
             end
 
+            if modified_raw then
+                if target_ui and target_ui.annotation and target_ui.annotation.sortItems then
+                    target_ui.annotation:sortItems(raw_items)
+                else
+                    annotations_helper.sort_by_position(raw_items)
+                end
+            end
+
             -- Update state snapshot with current active items
             local new_state_annos = {}
             for idx, l_item in ipairs(raw_items) do
@@ -857,6 +865,14 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                         table.insert(raw_items, converted)
                         modified_raw = true
                     end
+                end
+            end
+
+            if modified_raw then
+                if target_ui and target_ui.annotation and target_ui.annotation.sortItems then
+                    target_ui.annotation:sortItems(raw_items)
+                else
+                    annotations_helper.sort_by_position(raw_items)
                 end
             end
 
