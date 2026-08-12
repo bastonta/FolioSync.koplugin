@@ -23,22 +23,12 @@ jobs:
 
       - name: Build release archive
         run: |
-          PLUGIN_DIR="FolioSync.koplugin"
-          mkdir -p "$PLUGIN_DIR"
-
-          # Copy only plugin runtime files
-          cp *.lua "$PLUGIN_DIR/"
-          cp -r l10n "$PLUGIN_DIR/"
-
-          # Remove dev-only files that may have been caught
-          rm -f "$PLUGIN_DIR/po2mo.py"
-
-          # Remove .po source files, keep only compiled .mo
-          find "$PLUGIN_DIR/l10n" -name '*.po' -delete
-          find "$PLUGIN_DIR/l10n" -name '*.pot' -delete
-
           TAG="${GITHUB_REF#refs/tags/}"
-          zip -r "FolioSync-${TAG}.zip" "$PLUGIN_DIR"
+          PLUGIN_DIR="FolioSync.koplugin"
+
+          make release VERSION="$TAG"
+
+          mv "build/${PLUGIN_DIR}.zip" "FolioSync-${TAG}.zip"
           echo "ARCHIVE=FolioSync-${TAG}.zip" >> "$GITHUB_ENV"
           echo "TAG=${TAG}" >> "$GITHUB_ENV"
 

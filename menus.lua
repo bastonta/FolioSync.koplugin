@@ -62,6 +62,7 @@ function Menus:get_menu_structure()
 end
 
 function Menus:get_settings_sub_menu()
+    local version = require("_version")
     return {
         {
             text_func = function()
@@ -104,6 +105,13 @@ function Menus:get_settings_sub_menu()
                 self.plugin.settings.auto_progress_sync = not self.plugin.settings.auto_progress_sync
                 self.plugin:save_settings()
             end,
+            separator = true,
+        },
+        {
+            text_func = function()
+                return T(_("Version: %1"), version)
+            end,
+            keep_menu_open = true,
         },
     }
 end
@@ -112,7 +120,7 @@ function Menus:prompt_server_url()
     local dialog
     dialog = InputDialog:new {
         title = _("Folio Server URL"),
-        input = self.plugin.settings.server_url or "http://192.168.1.100:8080",
+        input = self.plugin.settings.server_url or "http://192.168.1.100:5144/api",
         description = _("Enter the base URL of your self-hosted Folio backend."),
         buttons = {
             {

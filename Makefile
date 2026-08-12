@@ -4,6 +4,7 @@ PO_FILES = $(wildcard l10n/*/*.po)
 MO_FILES = $(PO_FILES:%.po=%.mo)
 PLUGIN_NAME = FolioSync.koplugin
 BUILD_DIR = build
+VERSION ?= dev
 
 MSGFMT = msgfmt
 XGETTEXT = xgettext
@@ -32,6 +33,7 @@ release: mo
 	mkdir -p $(BUILD_DIR)/$(PLUGIN_NAME)
 	cp *.lua $(BUILD_DIR)/$(PLUGIN_NAME)/
 	cp -r l10n $(BUILD_DIR)/$(PLUGIN_NAME)/
+	echo 'return "$(VERSION)"' > $(BUILD_DIR)/$(PLUGIN_NAME)/_version.lua
 	find $(BUILD_DIR)/$(PLUGIN_NAME)/l10n -name '*.po' -delete
 	find $(BUILD_DIR)/$(PLUGIN_NAME)/l10n -name '*.pot' -delete
 	cd $(BUILD_DIR) && zip -r $(PLUGIN_NAME).zip $(PLUGIN_NAME)
