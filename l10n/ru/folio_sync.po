@@ -78,12 +78,12 @@ msgid "Server URL: %1"
 msgstr "URL сервера: %1"
 
 #: menus.lua:86
-msgid "🔑 API Key: %1"
-msgstr "🔑 API-ключ: %1"
+msgid "API Key: %1"
+msgstr "API-ключ: %1"
 
 #: menus.lua:88
-msgid "🔑 API Key: Not Set (Tap to Enter API Key)"
-msgstr "🔑 API-ключ: Не задан (нажмите, чтобы ввести)"
+msgid "API Key: Not Set (Tap to Enter API Key)"
+msgstr "API-ключ: Не задан (нажмите, чтобы ввести)"
 
 #: menus.lua:98
 msgid "Download Folder: %1"

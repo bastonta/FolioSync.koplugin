@@ -20,36 +20,44 @@ function Menus:get_menu_structure()
     return {
         text = _("Folio Sync & Library"),
         sorting_hint = "tools",
-        sub_item_table = {
-            {
-                text = _("📚 Browse & Download Books from Folio"),
-                callback = function()
-                    self.plugin.browser:show()
-                end,
-            },
-            {
+        sub_item_table_func = function()
+            local items = {}
+
+            -- Only show browse on the main FileManager screen (no document open)
+            if not self.plugin.ui.document then
+                table.insert(items, {
+                    text = _("📚 Browse & Download Books from Folio"),
+                    callback = function()
+                        self.plugin.browser:show()
+                    end,
+                })
+            end
+
+            table.insert(items, {
                 text = _("📤 Push All Data of Active Document"),
                 callback = function()
                     self.plugin.manager:push_all_data(self.plugin:get_ui(), nil, true)
                 end,
-            },
-            {
+            })
+            table.insert(items, {
                 text = _("📥 Fetch All Data of Active Document"),
                 callback = function()
                     self.plugin.manager:pull_all_data(self.plugin:get_ui(), nil, true)
                 end,
-            },
-            {
+            })
+            table.insert(items, {
                 text = _("🔄 Sync Active Document Annotations"),
                 callback = function()
                     self.plugin.manager:sync_annotations(self.plugin:get_ui(), nil, true)
                 end,
-            },
-            {
+            })
+            table.insert(items, {
                 text = _("⚙️ Settings & Account"),
                 sub_item_table = self:get_settings_sub_menu(),
-            },
-        },
+            })
+
+            return items
+        end,
     }
 end
 
@@ -69,9 +77,9 @@ function Menus:get_settings_sub_menu()
                 local key = self.plugin.settings.api_key or ""
                 if key ~= "" then
                     local prefix = string.len(key) > 10 and (string.sub(key, 1, 10) .. "...") or key
-                    return T(_("🔑 API Key: %1"), prefix)
+                    return T(_("API Key: %1"), prefix)
                 else
-                    return _("🔑 API Key: Not Set (Tap to Enter API Key)")
+                    return _("API Key: Not Set (Tap to Enter API Key)")
                 end
             end,
             callback = function()

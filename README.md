@@ -44,7 +44,7 @@
 1. Open KOReader's main menu and navigate to **Tools** (`🛠️`) -> **Folio Sync & Library** -> **⚙️ Settings & Account**.
 2. Configure the following fields:
    - **Server URL**: The base URL of your Folio server (e.g., `http://192.168.1.100:8080`).
-   - **🔑 API Key**: Your user API key generated from your Folio user profile.
+   - **API Key**: Your user API key generated from your Folio user profile.
    - **Download Folder**: Path where downloaded books will be saved (default: `/sdcard/books/FolioSync`).
    - **Auto-sync Reading Progress**: Toggle background progress syncing.
 

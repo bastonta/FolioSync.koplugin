@@ -83,11 +83,11 @@ msgid "Server URL: %1"
 msgstr ""
 
 #: menus.lua:86
-msgid "🔑 API Key: %1"
+msgid "API Key: %1"
 msgstr ""
 
 #: menus.lua:88
-msgid "🔑 API Key: Not Set (Tap to Enter API Key)"
+msgid "API Key: Not Set (Tap to Enter API Key)"
 msgstr ""
 
 #: menus.lua:98
