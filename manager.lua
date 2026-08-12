@@ -79,31 +79,49 @@ end
 
 -- Compute SHA-256 hash of a file (matches Folio server algorithm)
 function Manager:compute_file_hash(file_path)
-    local sha2 = nil
     -- Try to load sha2 from KOReader's ffi/sha2 or fallback to external
-    local ok, mod = pcall(require, "ffi/sha2")
-    if ok and mod then
-        sha2 = mod
+    local ok, sha2 = pcall(require, "ffi/sha2")
+    if not ok or not sha2 or not sha2.sha256 then
+        sha2 = nil
     end
 
-    if sha2 and sha2.sha256 then
+    if sha2 then
         local f = io.open(file_path, "rb")
         if not f then return nil end
+
+        local CHUNK_SIZE = 65536
+
+        if type(sha2.new) == "function" then
+            local success, hash_obj = pcall(sha2.new)
+            if success and hash_obj then
+                while true do
+                    local chunk = f:read(CHUNK_SIZE)
+                    if not chunk or #chunk == 0 then break end
+                    hash_obj:update(chunk)
+                end
+                f:close()
+                return hash_obj:digest("hex")
+            end
+        end
+
         local content = f:read("*a")
         f:close()
-        if not content then return nil end
-        return sha2.sha256(content)
+        if content then
+            return sha2.sha256(content)
+        end
     end
 
     -- Fallback: use sha256sum command if available
-    local cmd = string.format('sha256sum "%s"', file_path)
+    local safe_path = file_path:gsub('["`$]', '\\%1')
+    local cmd = string.format('sha256sum "%s" 2>/dev/null', safe_path)
     local handle = io.popen(cmd)
     if not handle then return nil end
+
     local result = handle:read("*a")
     handle:close()
+
     if result and result ~= "" then
-        local hash = result:match("^(%x+)")
-        return hash
+        return result:match("^(%x+)")
     end
 
     return nil
@@ -1018,19 +1036,20 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
 
         -- Method A: KOReader's native ReaderLink widget (best precision: moves page AND scrolls to element)
         if ui.link and ui.link.onGotoLink then
-            local ok = pcall(function() ui.link:onGotoLink({ xpointer = remote_pos }) end)
-            if ok then
+            local ok, res = pcall(function() return ui.link:onGotoLink({ xpointer = remote_pos }) end)
+            if ok and (res == nil or res == true) then
                 logger.info("FolioSync Manager: successfully jumped via ui.link:onGotoLink")
                 return true
             end
         end
 
         -- Method B: GotoPos event
-        local ok_event = pcall(function()
-            ui:handleEvent(Event:new("GotoPos", remote_pos))
-            UIMgr:broadcastEvent(Event:new("GotoPos", remote_pos))
+        local ok_event, res_event = pcall(function()
+            local r1 = ui:handleEvent(Event:new("GotoPos", remote_pos))
+            local r2 = UIMgr:broadcastEvent(Event:new("GotoPos", remote_pos))
+            return r1 or r2
         end)
-        if ok_event then
+        if ok_event and res_event then
             logger.info("FolioSync Manager: successfully jumped via GotoPos event")
             return true
         end

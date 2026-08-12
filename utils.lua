@@ -1,4 +1,4 @@
-local reader_order = require("ui/elements/reader_menu_order")
+local ok_ro, reader_order = pcall(require, "ui/elements/reader_menu_order")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local json = require("json")
@@ -37,6 +37,9 @@ function M.write_json(path, data)
 end
 
 function M.insert_after_statistics(key)
+    if not ok_ro or not reader_order or not reader_order.tools then
+        return
+    end
     local pos = 1
     for index, value in ipairs(reader_order.tools) do
         if value == key then

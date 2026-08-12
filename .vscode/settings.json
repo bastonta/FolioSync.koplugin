@@ -19,6 +19,7 @@
     "sdcard",
     "sockethttp",
     "socketutil",
+    "sslhttps",
     "uimanager",
     "urlencode",
     "widgetcontainer",

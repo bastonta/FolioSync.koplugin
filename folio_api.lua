@@ -15,8 +15,12 @@ end
 
 local function get_http_client()
     local ok_http, sockethttp = pcall(require, "socket.http")
+    local ok_https, sslhttps = pcall(require, "ssl.https")
     local ok_ltn12, ltn12 = pcall(require, "ltn12")
-    if not ok_http or not sockethttp or not ok_ltn12 or not ltn12 then
+    if not (ok_http and sockethttp) and not (ok_https and sslhttps) then
+        return nil
+    end
+    if not ok_ltn12 or not ltn12 then
         return nil
     end
 
@@ -49,11 +53,19 @@ local function get_http_client()
 
         if ok_su and socketutil then
             if socketutil.set_timeout then
-                socketutil:set_timeout(15)
+                socketutil:set_timeout(10, 30)
             end
         end
 
-        local res, code, resp_headers, status = sockethttp.request(request_params)
+        local http_driver = sockethttp
+        if url and url:sub(1, 6):lower() == "https:" and ok_https and sslhttps then
+            http_driver = sslhttps
+        end
+
+        local res, code, resp_headers
+        if http_driver then
+            res, code, resp_headers = http_driver.request(request_params)
+        end
 
         if ok_su and socketutil then
             if socketutil.reset_timeout then
