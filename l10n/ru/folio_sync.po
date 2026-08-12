@@ -293,17 +293,29 @@ msgstr "Укажите API-ключ в настройках."
 msgid "Book not found in Folio library."
 msgstr "Книга не найдена в библиотеке Folio."
 
-#: manager.lua:181
+#: manager.lua:454
 msgid "Syncing annotations with Folio..."
 msgstr "Синхронизация аннотаций с Folio…"
 
-#: manager.lua:188
+#: manager.lua:454
+msgid "Syncing annotations & bookmarks with Folio..."
+msgstr "Синхронизация аннотаций и закладок с Folio…"
+
+#: manager.lua:460
 msgid "Failed to fetch remote annotations."
 msgstr "Не удалось получить аннотации с сервера."
 
-#: manager.lua:219
+#: manager.lua:690
 msgid "Annotations synchronized with Folio!"
 msgstr "Аннотации синхронизированы с Folio!"
+
+#: manager.lua:690
+msgid "Annotations & bookmarks synchronized with Folio!"
+msgstr "Аннотации и закладки синхронизированы с Folio!"
+
+#: manager.lua:708
+msgid "Failed to synchronize annotations or bookmarks."
+msgstr "Не удалось синхронизировать аннотации или закладки."
 
 #: manager.lua:251
 msgid "Pushing all document data to Folio..."

@@ -695,6 +695,27 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
     end)
 end
 
+-- Synchronize both annotations and bookmarks for current document
+function Manager:sync_annotations_and_bookmarks(ui, document, force_manual, callback)
+    if force_manual then
+        utils.show_msg(_("Syncing annotations & bookmarks with Folio..."))
+    end
+
+    self:sync_annotations(ui, document, false, function(annos_ok)
+        self:sync_bookmarks(ui, document, false, function(bms_ok)
+            if force_manual then
+                if annos_ok and bms_ok then
+                    utils.show_msg(_("Annotations & bookmarks synchronized with Folio!"))
+                else
+                    utils.show_msg(_("Failed to synchronize annotations or bookmarks."))
+                end
+            end
+
+            if callback then callback(annos_ok and bms_ok) end
+        end)
+    end)
+end
+
 -- Synchronize bookmarks for current document (State-Aware 2-Way Sync)
 function Manager:sync_bookmarks(ui, document, force_manual, callback)
     if not self.api:has_auth() then
@@ -983,8 +1004,7 @@ function Manager:push_all_data(ui, document, force_manual)
         logger.info("FolioSync Manager: local progress: " .. percent .. ", location: " .. location)
 
         self.api:update_progress(book_id, location, percent, function(push_prog_ok)
-            self:sync_annotations(ui, document, false)
-            self:sync_bookmarks(ui, document, false)
+            self:sync_annotations_and_bookmarks(ui, document, false)
             if force_manual then
                 if push_prog_ok then
                     utils.show_msg(T(_("All document data sent to Folio (%1%)!"), math.floor(percent)))
@@ -1141,13 +1161,11 @@ function Manager:pull_all_data(ui, document, force_manual)
             end
 
             -- 2-Way Sync Annotations & Bookmarks
-            self:sync_annotations(ui, document, false, function()
-                self:sync_bookmarks(ui, document, false, function()
-                    if force_manual then
-                        utils.show_msg(T(_("Fetched remote data: %1"),
-                            progress_msg ~= "" and progress_msg or _("Up to date")))
-                    end
-                end)
+            self:sync_annotations_and_bookmarks(ui, document, false, function()
+                if force_manual then
+                    utils.show_msg(T(_("Fetched remote data: %1"),
+                        progress_msg ~= "" and progress_msg or _("Up to date")))
+                end
             end)
         end)
     end)

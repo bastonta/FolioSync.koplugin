@@ -302,16 +302,28 @@ msgstr ""
 msgid "Book not found in Folio library."
 msgstr ""
 
-#: manager.lua:181
+#: manager.lua:454
 msgid "Syncing annotations with Folio..."
 msgstr ""
 
-#: manager.lua:188
+#: manager.lua:454
+msgid "Syncing annotations & bookmarks with Folio..."
+msgstr ""
+
+#: manager.lua:460
 msgid "Failed to fetch remote annotations."
 msgstr ""
 
-#: manager.lua:219
+#: manager.lua:690
 msgid "Annotations synchronized with Folio!"
+msgstr ""
+
+#: manager.lua:690
+msgid "Annotations & bookmarks synchronized with Folio!"
+msgstr ""
+
+#: manager.lua:708
+msgid "Failed to synchronize annotations or bookmarks."
 msgstr ""
 
 #: manager.lua:245 manager.lua:291

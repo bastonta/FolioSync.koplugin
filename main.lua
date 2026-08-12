@@ -118,7 +118,7 @@ end
 function FolioSync:onCloseDocument()
     if self.settings.auto_progress_sync and self.ui and self.ui.document then
         self.manager:sync_progress(self.ui, self.ui.document, true)
-        self.manager:sync_annotations(self.ui, self.ui.document, false)
+        self.manager:sync_annotations_and_bookmarks(self.ui, self.ui.document, false)
     end
 end
 

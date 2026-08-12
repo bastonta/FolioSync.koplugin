@@ -48,7 +48,7 @@ function Menus:get_menu_structure()
             table.insert(items, {
                 text = _("🔄 Sync Active Document Annotations"),
                 callback = function()
-                    self.plugin.manager:sync_annotations(self.plugin:get_ui(), nil, true)
+                    self.plugin.manager:sync_annotations_and_bookmarks(self.plugin:get_ui(), nil, true)
                 end,
             })
             table.insert(items, {
