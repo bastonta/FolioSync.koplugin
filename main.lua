@@ -128,12 +128,12 @@ function FolioSync:onDispatcherRegisterActions()
             category = "string",
             event = "FolioSyncToggleAutoSync",
             title = _("FolioSync: Set auto progress sync"),
-            reader = true,
+            general = true,
             args = { true, false },
             toggle = { _("on"), _("off") },
         })
     Dispatcher:registerAction("foliosync_toggle_autosync",
-        { category = "none", event = "FolioSyncToggleAutoSync", title = _("FolioSync: Toggle auto progress sync"), reader = true, })
+        { category = "none", event = "FolioSyncToggleAutoSync", title = _("FolioSync: Toggle auto progress sync"), general = true, })
     Dispatcher:registerAction("foliosync_push_doc",
         { category = "none", event = "FolioSyncPushDoc", title = _("FolioSync: Push document data to server"), reader = true, })
     Dispatcher:registerAction("foliosync_pull_doc",
