@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Compile translations
+        run: |
+          sudo apt-get update && sudo apt-get install -y gettext
+          make mo
+
+      - name: Build release archive
+        run: |
+          PLUGIN_DIR="FolioSync.koplugin"
+          mkdir -p "$PLUGIN_DIR"
+
+          # Copy only plugin runtime files
+          cp *.lua "$PLUGIN_DIR/"
+          cp -r l10n "$PLUGIN_DIR/"
+
+          # Remove dev-only files that may have been caught
+          rm -f "$PLUGIN_DIR/po2mo.py"
+
+          # Remove .po source files, keep only compiled .mo
+          find "$PLUGIN_DIR/l10n" -name '*.po' -delete
+          find "$PLUGIN_DIR/l10n" -name '*.pot' -delete
+
+          TAG="${GITHUB_REF#refs/tags/}"
+          zip -r "FolioSync-${TAG}.zip" "$PLUGIN_DIR"
+          echo "ARCHIVE=FolioSync-${TAG}.zip" >> "$GITHUB_ENV"
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "FolioSync ${{ env.TAG }}"
+          generate_release_notes: true
+          files: ${{ env.ARCHIVE }}

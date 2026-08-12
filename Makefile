@@ -2,11 +2,13 @@ DOMAIN = folio_sync
 TEMPLATE_DIR = l10n
 PO_FILES = $(wildcard l10n/*/*.po)
 MO_FILES = $(PO_FILES:%.po=%.mo)
+PLUGIN_NAME = FolioSync.koplugin
+BUILD_DIR = build
 
 MSGFMT = msgfmt
 XGETTEXT = xgettext
 
-.PHONY: all pot mo clean
+.PHONY: all pot mo clean release
 
 all: mo
 
@@ -25,5 +27,16 @@ pot:
 		--output=$(TEMPLATE_DIR)/$(DOMAIN).pot \
 		*.lua
 
+release: mo
+	rm -rf $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)/$(PLUGIN_NAME)
+	cp *.lua $(BUILD_DIR)/$(PLUGIN_NAME)/
+	cp -r l10n $(BUILD_DIR)/$(PLUGIN_NAME)/
+	find $(BUILD_DIR)/$(PLUGIN_NAME)/l10n -name '*.po' -delete
+	find $(BUILD_DIR)/$(PLUGIN_NAME)/l10n -name '*.pot' -delete
+	cd $(BUILD_DIR) && zip -r $(PLUGIN_NAME).zip $(PLUGIN_NAME)
+	@echo "Archive: $(BUILD_DIR)/$(PLUGIN_NAME).zip"
+
 clean:
 	rm -f $(MO_FILES)
+	rm -rf $(BUILD_DIR)
