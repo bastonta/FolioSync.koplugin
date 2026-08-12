@@ -41,9 +41,9 @@ function FolioSync:init()
         end
     end
 
-    self:onDispatcherRegisterActions()
-
     -- Load plugin translations dynamically if available for the active locale
+    -- NOTE: Must happen BEFORE onDispatcherRegisterActions() so that _() calls
+    -- in dispatcher title strings pick up the translated text.
     local lang = gettext.current_lang
     if lang and lang ~= "C" and lang ~= "" then
         local path = self.path or "plugins/FolioSync.koplugin"
@@ -54,6 +54,8 @@ function FolioSync:init()
             gettext.loadMO(mo_path)
         end
     end
+
+    self:onDispatcherRegisterActions()
 
     utils.insert_after_statistics("folio_sync")
     if self.ui and self.ui.menu then
