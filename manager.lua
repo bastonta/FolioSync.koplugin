@@ -245,7 +245,7 @@ function Manager:get_doc_info(ui, document)
     end
     if type(location) == "table" then
         location = location.xpointer or location.location or (location.page and string.format("page_%d", location.page)) or
-        tostring(location)
+            tostring(location)
     end
     if not location and current_page then
         location = string.format("page_%d", current_page)
@@ -502,6 +502,8 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 state.has_synced_annos = true
             else
                 -- SUBSEQUENT SYNC: State-aware 2-Way Sync (Local & Remote Deletions)
+                local locally_deleted_ids = {} -- track folio_ids deleted in step 1
+
                 -- 1. Local Deletions
                 local snap_keys = {}
                 for key, _ in pairs(state_annos) do
@@ -529,6 +531,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                         end
                         if fid then
                             self.api:delete_annotation(book_id, fid)
+                            locally_deleted_ids[fid] = true
                         end
                         state_annos[key] = nil
                     end
@@ -596,25 +599,30 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
 
                 -- 4. New remote items -> pull
                 for _, r_item in ipairs(remote_annos) do
-                    local converted = annotations_helper.folio_to_koreader_annotation(r_item, target_doc)
-                    local in_state = false
-                    for _, snap in pairs(state_annos) do
-                        if annotations_helper.is_same_annotation(converted, snap) or (snap.folio_id and r_item.id and snap.folio_id == r_item.id) then
-                            in_state = true
-                            break
+                    -- Skip items we just deleted locally in step 1
+                    if r_item.id and locally_deleted_ids[r_item.id] then
+                        -- noop: this annotation was just deleted locally, don't re-add
+                    else
+                        local converted = annotations_helper.folio_to_koreader_annotation(r_item, target_doc)
+                        local in_state = false
+                        for _, snap in pairs(state_annos) do
+                            if annotations_helper.is_same_annotation(converted, snap) or (snap.folio_id and r_item.id and snap.folio_id == r_item.id) then
+                                in_state = true
+                                break
+                            end
                         end
-                    end
-                    local in_local = false
-                    for _, l_item in ipairs(raw_items) do
-                        if annotations_helper.is_annotation(l_item) and (annotations_helper.is_same_annotation(l_item, r_item) or annotations_helper.is_same_annotation(l_item, converted)) then
-                            l_item.folio_id = r_item.id or l_item.folio_id
-                            in_local = true
-                            break
+                        local in_local = false
+                        for _, l_item in ipairs(raw_items) do
+                            if annotations_helper.is_annotation(l_item) and (annotations_helper.is_same_annotation(l_item, r_item) or annotations_helper.is_same_annotation(l_item, converted)) then
+                                l_item.folio_id = r_item.id or l_item.folio_id
+                                in_local = true
+                                break
+                            end
                         end
-                    end
-                    if not in_state and not in_local and converted then
-                        table.insert(raw_items, converted)
-                        modified_raw = true
+                        if not in_state and not in_local and converted then
+                            table.insert(raw_items, converted)
+                            modified_raw = true
+                        end
                     end
                 end
             end
@@ -751,6 +759,8 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                 state.has_synced_bms = true
             else
                 -- SUBSEQUENT SYNC: State-aware 2-Way Sync (Local & Remote Deletions)
+                local locally_deleted_ids = {} -- track folio_ids deleted in step 1
+
                 -- 1. Local Deletions
                 local snap_keys = {}
                 for key, _ in pairs(state_bms) do
@@ -778,6 +788,7 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                         end
                         if fid then
                             self.api:delete_bookmark(book_id, fid)
+                            locally_deleted_ids[fid] = true
                         end
                         state_bms[key] = nil
                     end
@@ -845,25 +856,30 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
 
                 -- 4. New remote bookmarks -> pull
                 for _, r_bm in ipairs(remote_bms) do
-                    local converted = annotations_helper.folio_to_koreader_bookmark(r_bm)
-                    local in_state = false
-                    for _, snap in pairs(state_bms) do
-                        if annotations_helper.is_same_bookmark(converted, snap) or (snap.folio_id and r_bm.id and snap.folio_id == r_bm.id) then
-                            in_state = true
-                            break
+                    -- Skip items we just deleted locally in step 1
+                    if r_bm.id and locally_deleted_ids[r_bm.id] then
+                        -- noop: this bookmark was just deleted locally, don't re-add
+                    else
+                        local converted = annotations_helper.folio_to_koreader_bookmark(r_bm)
+                        local in_state = false
+                        for _, snap in pairs(state_bms) do
+                            if annotations_helper.is_same_bookmark(converted, snap) or (snap.folio_id and r_bm.id and snap.folio_id == r_bm.id) then
+                                in_state = true
+                                break
+                            end
                         end
-                    end
-                    local in_local = false
-                    for _, l_item in ipairs(raw_items) do
-                        if annotations_helper.is_bookmark(l_item) and (annotations_helper.is_same_bookmark(l_item, r_bm) or annotations_helper.is_same_bookmark(l_item, converted)) then
-                            l_item.folio_id = r_bm.id or l_item.folio_id
-                            in_local = true
-                            break
+                        local in_local = false
+                        for _, l_item in ipairs(raw_items) do
+                            if annotations_helper.is_bookmark(l_item) and (annotations_helper.is_same_bookmark(l_item, r_bm) or annotations_helper.is_same_bookmark(l_item, converted)) then
+                                l_item.folio_id = r_bm.id or l_item.folio_id
+                                in_local = true
+                                break
+                            end
                         end
-                    end
-                    if not in_state and not in_local and converted then
-                        table.insert(raw_items, converted)
-                        modified_raw = true
+                        if not in_state and not in_local and converted then
+                            table.insert(raw_items, converted)
+                            modified_raw = true
+                        end
                     end
                 end
             end
