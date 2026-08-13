@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: FolioSync 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-12 19:54+0500\n"
+"POT-Creation-Date: 2026-08-13 13:21+0500\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -27,135 +27,127 @@ msgid ""
 "Folio server."
 msgstr ""
 
-#: browser.lua:37
+#: browser.lua:39
 msgid "Please enter your Folio API Key in Settings."
 msgstr ""
 
-#: browser.lua:44
+#: browser.lua:46
 msgid "Fetching library from Folio..."
 msgstr ""
 
-#: browser.lua:53
+#: browser.lua:61
 msgid "Failed to load library from Folio server."
 msgstr ""
 
-#: browser.lua:72
+#: browser.lua:80
 msgid "Series"
 msgstr ""
 
-#: browser.lua:74
+#: browser.lua:82
 msgid "📁 .. (Back from %1)"
 msgstr ""
 
-#: browser.lua:89
+#: browser.lua:101
 msgid "Recent"
 msgstr ""
 
-#: browser.lua:90
+#: browser.lua:102
 msgid "Sort Order"
 msgstr ""
 
-#: browser.lua:90
+#: browser.lua:102
 msgid "Name"
 msgstr ""
 
-#: browser.lua:92
+#: browser.lua:104
 msgid "🔃 Sort: %1 (tap to change)"
 msgstr ""
 
-#: browser.lua:100
+#: browser.lua:113
+msgid "⬆️ Load Previous (Server Page %1 of %2)"
+msgstr ""
+
+#: browser.lua:127
 msgid "No items found in this location."
 msgstr ""
 
-#: browser.lua:106
+#: browser.lua:133
 msgid "Untitled"
 msgstr ""
 
-#: browser.lua:136
-msgid "Page %1 of %2"
+#: browser.lua:166
+msgid "⬇️ Load Next (Server Page %1 of %2)"
 msgstr ""
 
-#: browser.lua:145
+#: browser.lua:178
 msgid "Folio Library"
 msgstr ""
 
-#: browser.lua:146
+#: browser.lua:179
 msgid "%1 (%2 items)"
 msgstr ""
 
-#: browser.lua:159
+#: browser.lua:205
 msgid "Sort by Name"
 msgstr ""
 
-#: browser.lua:167
+#: browser.lua:214
 msgid "Sort by Recently Added"
 msgstr ""
 
-#: browser.lua:175
+#: browser.lua:223
 msgid "Sort by Series Order"
 msgstr ""
 
-#: browser.lua:184
+#: browser.lua:233
 msgid "Select Sorting Order"
 msgstr ""
 
-#: browser.lua:194
-msgid "◀ Previous Page"
-msgstr ""
-
-#: browser.lua:203
-msgid "Next Page ▶"
-msgstr ""
-
-#: browser.lua:212
-msgid "Select Page"
-msgstr ""
-
-#: browser.lua:224
+#: browser.lua:249
 msgid "📥 Download to default folder (%1)"
 msgstr ""
 
-#: browser.lua:230
+#: browser.lua:255
 msgid "📁 Choose custom download folder..."
 msgstr ""
 
-#: browser.lua:238
+#: browser.lua:263
 msgid "Download '%1'"
 msgstr ""
 
-#: browser.lua:247
+#: browser.lua:275
 msgid "Custom Download Folder"
 msgstr ""
 
-#: browser.lua:249
+#: browser.lua:277
 msgid "Enter folder path on device to save this book:"
 msgstr ""
 
-#: browser.lua:253 browser.lua:301 menus.lua:120 menus.lua:152 menus.lua:186
+#: browser.lua:281 browser.lua:329 menus.lua:128 menus.lua:160 menus.lua:194
 msgid "Cancel"
 msgstr ""
 
-#: browser.lua:260 browser.lua:300
+#: browser.lua:288 browser.lua:328
 msgid "Download"
 msgstr ""
 
-#: browser.lua:293
+#: browser.lua:321
 msgid "'%1' already exists in '%2'. Redownload from Folio?"
 msgstr ""
 
-#: browser.lua:295
+#: browser.lua:323
 msgid "Download '%1' to '%2'?"
 msgstr ""
 
-#: browser.lua:300
+#: browser.lua:328
 msgid "Redownload"
 msgstr ""
 
-#: browser.lua:321
+#: browser.lua:349
 msgid "Downloading '%1'..."
 msgstr ""
 
-#: browser.lua:328
+#: browser.lua:360
 msgid ""
 "'%1' downloaded successfully to:\n"
 "%2\n"
@@ -163,59 +155,59 @@ msgid ""
 "Do you want to open it now?"
 msgstr ""
 
-#: browser.lua:329
+#: browser.lua:361
 msgid "Open Book"
 msgstr ""
 
-#: browser.lua:330
+#: browser.lua:362
 msgid "Close"
 msgstr ""
 
-#: browser.lua:341
+#: browser.lua:373
 msgid "Failed to download book: %1"
 msgstr ""
 
-#: main.lua:130
+#: main.lua:132
 msgid "FolioSync: Set auto progress sync"
 msgstr ""
 
-#: main.lua:133
+#: main.lua:135
 msgid "on"
 msgstr ""
 
-#: main.lua:133
+#: main.lua:135
 msgid "off"
 msgstr ""
 
-#: main.lua:136
+#: main.lua:138
 msgid "FolioSync: Toggle auto progress sync"
 msgstr ""
 
-#: main.lua:138
+#: main.lua:140
 msgid "FolioSync: Push document data to server"
 msgstr ""
 
-#: main.lua:140
+#: main.lua:142
 msgid "FolioSync: Pull document data from server"
 msgstr ""
 
-#: main.lua:142
+#: main.lua:144
 msgid "FolioSync: Sync active document"
 msgstr ""
 
-#: main.lua:144
+#: main.lua:146
 msgid "FolioSync: Browse library"
 msgstr ""
 
-#: main.lua:154
+#: main.lua:156
 msgid "ON"
 msgstr ""
 
-#: main.lua:154
+#: main.lua:156
 msgid "OFF"
 msgstr ""
 
-#: main.lua:155
+#: main.lua:157
 #, lua-format
 msgid "Auto progress sync: %s"
 msgstr ""
@@ -312,66 +304,70 @@ msgstr ""
 msgid "⚙️ Settings & Account"
 msgstr ""
 
-#: menus.lua:68
+#: menus.lua:69
 msgid "Not set"
 msgstr ""
 
-#: menus.lua:69
+#: menus.lua:70
 msgid "Server URL: %1"
 msgstr ""
 
-#: menus.lua:80
+#: menus.lua:81
 msgid "API Key: %1"
 msgstr ""
 
-#: menus.lua:82
+#: menus.lua:83
 msgid "API Key: Not Set (Tap to Enter API Key)"
 msgstr ""
 
-#: menus.lua:92
+#: menus.lua:93
 msgid "Download Folder: %1"
 msgstr ""
 
-#: menus.lua:99
+#: menus.lua:100
 msgid "Auto-sync Reading Progress"
 msgstr ""
 
-#: menus.lua:114
+#: menus.lua:112
+msgid "Version: %1"
+msgstr ""
+
+#: menus.lua:122
 msgid "Folio Server URL"
 msgstr ""
 
-#: menus.lua:116
+#: menus.lua:124
 msgid "Enter the base URL of your self-hosted Folio backend."
 msgstr ""
 
-#: menus.lua:127 menus.lua:159 menus.lua:193
+#: menus.lua:135 menus.lua:167 menus.lua:201
 msgid "Save"
 msgstr ""
 
-#: menus.lua:134
+#: menus.lua:142
 msgid "Server URL saved!"
 msgstr ""
 
-#: menus.lua:146
+#: menus.lua:154
 msgid "Download Folder Path"
 msgstr ""
 
-#: menus.lua:148
+#: menus.lua:156
 msgid "Location on device where downloaded books will be stored."
 msgstr ""
 
-#: menus.lua:166
+#: menus.lua:174
 msgid "Download folder path updated."
 msgstr ""
 
-#: menus.lua:180
+#: menus.lua:188
 msgid "Folio API Key"
 msgstr ""
 
-#: menus.lua:182
+#: menus.lua:190
 msgid "Enter API key generated from your Folio profile."
 msgstr ""
 
-#: menus.lua:203
+#: menus.lua:211
 msgid "API Key saved!"
 msgstr ""
