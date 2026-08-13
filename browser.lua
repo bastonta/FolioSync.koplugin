@@ -77,7 +77,8 @@ function FolioBrowser:fetch_items(append)
     local current_request = self.request_id
     local offset = (self.current_page - 1) * self.limit
 
-    local success, response = self.api:browse(self.current_series_id, self.sort_by, offset, self.limit, self.search_query, self.search_by)
+    local success, response = self.api:browse(self.current_series_id, self.sort_by, offset, self.limit, self
+        .search_query, self.search_by)
     self.is_loading = false
 
     -- If the user closed or changed directory while loading, abort rendering
