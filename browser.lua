@@ -7,29 +7,26 @@ local Menu = require("ui/widget/menu")
 local T = require("ffi/util").template
 local utils = require("utils")
 
-local FolioBrowser = {}
+local FolioBrowser = Menu:extend {
+    current_series_id = nil,
+    series_stack = nil,
+    current_page = 1,
+    limit = 15,
+    sort_by = "name",
+    request_id = 0,
+}
 
-function FolioBrowser:new(plugin_instance)
-    local o = {
-        plugin = plugin_instance,
-        api = plugin_instance.api,
-        current_series_id = nil,
-        series_stack = {},
-        current_page = 1,
-        limit = 15,
-        sort_by = "name",
-        current_menu = nil,
-        request_id = 0,
-    }
-    setmetatable(o, self)
-    self.__index = self
-    return o
-end
+function FolioBrowser:init()
+    self.paths = {}
+    self.item_table = {}
 
-function FolioBrowser:show()
-    self.current_series_id = nil
-    self.series_stack = {}
-    self.current_page = 1
+    self.title_bar_left_icon = "appbar.menu"
+    self.onLeftButtonTap = function()
+        self:prompt_sort_by()
+    end
+
+    Menu.init(self)
+
     self:load_and_render()
 end
 
@@ -42,88 +39,63 @@ function FolioBrowser:load_and_render()
         return
     end
 
-    UIManager:show(InfoMessage:new {
-        text = _("Fetching library from Folio..."),
-        timeout = 2,
-    })
+    self.request_id = self.request_id + 1
+    self.has_more = true
+    self:fetch_items(false)
+end
 
+function FolioBrowser:fetch_items(append)
+    if self.is_loading then return false end
+    if append and not self.has_more then return false end
+
+    self.is_loading = true
+    if not append then
+        self.current_page = 1
+        self.item_table = {}
+        -- Folder navigation: Back to parent series / root
+        if self.current_series_id and #self.paths > 0 then
+            local current = self.paths[#self.paths]
+            local current_name = current and current.name or _("Series")
+            table.insert(self.item_table, {
+                text = T(_("📁 .. (Back from %1)"), current_name),
+                is_back = true,
+            })
+        end
+    else
+        self.current_page = self.current_page + 1
+    end
+
+    local current_request = self.request_id
     local offset = (self.current_page - 1) * self.limit
 
-    self.request_id = self.request_id + 1
-    local current_request = self.request_id
+    local success, response = self.api:browse(self.current_series_id, self.sort_by, offset, self.limit)
+    self.is_loading = false
 
-    self.api:browse(self.current_series_id, self.sort_by, offset, self.limit, function(success, response)
-        -- If the user closed the browser while loading, abort rendering
-        if current_request ~= self.request_id then return end
+    -- If the user closed or changed directory while loading, abort rendering
+    if current_request ~= self.request_id then return false end
 
-        if not success or not response then
+    if not success or not response then
+        if not append then
             UIManager:show(InfoMessage:new {
                 text = _("Failed to load library from Folio server."),
                 timeout = 4,
             })
-            return
         end
-
-        local items = response.items or {}
-        local total = response.total or #items
-
-        self:render_menu(items, total)
-    end)
-end
-
-function FolioBrowser:render_menu(items, total)
-    local item_table = {}
-
-    -- Folder navigation: Back to parent series / root
-    if self.current_series_id and #self.series_stack > 0 then
-        local current = self.series_stack[#self.series_stack]
-        local current_name = current and current.name or _("Series")
-        table.insert(item_table, {
-            text = T(_("📁 .. (Back from %1)"), current_name),
-            callback = function()
-                if self.current_menu then
-                    UIManager:close(self.current_menu)
-                    self.current_menu = nil
-                end
-                table.remove(self.series_stack)
-                if #self.series_stack > 0 then
-                    self.current_series_id = self.series_stack[#self.series_stack].id
-                else
-                    self.current_series_id = nil
-                end
-                self.current_page = 1
-                self:load_and_render()
-            end,
-        })
+        self.has_more = false
+        return false
     end
 
-    -- Sorting options
-    local sort_label = self.sort_by == "recent" and _("Recent") or
-        (self.sort_by == "sortOrder" and _("Sort Order") or _("Name"))
-    table.insert(item_table, {
-        text = T(_("🔃 Sort: %1 (tap to change)"), sort_label),
-        callback = function()
-            self:prompt_sort_by()
-        end,
-    })
+    local items = response.items or {}
+    local total = response.total or #items
 
-    local max_page = math.max(1, math.ceil(total / self.limit))
-    if self.current_page > 1 then
-        table.insert(item_table, {
-            text = T(_("⬆️ Load Previous (Server Page %1 of %2)"), self.current_page - 1, max_page),
-            callback = function()
-                if self.current_menu then
-                    UIManager:close(self.current_menu)
-                    self.current_menu = nil
-                end
-                self.current_page = self.current_page - 1
-                self:load_and_render()
-            end,
-        })
+    if #items < self.limit then
+        self.has_more = false
+    else
+        self.has_more = true
     end
 
-    if #items == 0 then
-        table.insert(item_table, {
+    if not append and #items == 0 then
+        table.insert(self.item_table, {
             text = _("No items found in this location."),
             enabled = false,
         })
@@ -133,76 +105,85 @@ function FolioBrowser:render_menu(items, total)
             local name = item.name or item.title or _("Untitled")
 
             if item_type == "series" then
-                table.insert(item_table, {
+                table.insert(self.item_table, {
                     text = string.format("📁 [Series] %s", name),
-                    callback = function()
-                        if self.current_menu then
-                            UIManager:close(self.current_menu)
-                            self.current_menu = nil
-                        end
-                        table.insert(self.series_stack, { id = item.id, name = name })
-                        self.current_series_id = item.id
-                        self.current_page = 1
-                        self:load_and_render()
-                    end,
+                    is_series = true,
+                    item = item,
                 })
             else
                 local author = item.author or ""
                 local display_text = (author ~= "") and string.format("📖 %s - %s", name, author) or
                     string.format("📖 %s", name)
 
-                table.insert(item_table, {
+                table.insert(self.item_table, {
                     text = display_text,
-                    callback = function()
-                        self:on_book_selected(item)
-                    end,
+                    is_book = true,
+                    item = item,
                 })
             end
         end
     end
 
-    if self.current_page < max_page then
-        table.insert(item_table, {
-            text = T(_("⬇️ Load Next (Server Page %1 of %2)"), self.current_page + 1, max_page),
-            callback = function()
-                if self.current_menu then
-                    UIManager:close(self.current_menu)
-                    self.current_menu = nil
-                end
-                self.current_page = self.current_page + 1
-                self:load_and_render()
-            end,
-        })
-    end
-
-    local location_title = (#self.series_stack > 0) and self.series_stack[#self.series_stack].name or _("Folio Library")
+    local location_title = (#self.paths > 0) and self.paths[#self.paths].name or _("Folio Library")
     local title_str = T(_("%1 (%2 items)"), location_title, total)
-    local menu
-    menu = Menu:new {
-        title = title_str,
-        item_table = item_table,
-        on_close = function()
-            UIManager:close(menu)
-            if self.current_menu == menu then
-                self.current_menu = nil
-                self.request_id = self.request_id + 1
+
+    self:switchItemTable(title_str, self.item_table, append and -1 or nil)
+    return true
+end
+
+function FolioBrowser:onNextPage(fill_only)
+    local page_num = self.page_num
+    while page_num == self.page_num do
+        if self.has_more then
+            if not self:fetch_items(true) then
+                break
             end
-        end,
-    }
-
-    if self.current_menu then
-        UIManager:close(self.current_menu)
+        else
+            break
+        end
     end
-    self.current_menu = menu
+    if not fill_only then
+        Menu.onNextPage(self)
+    end
+    return true
+end
 
-    UIManager:show(menu)
+function FolioBrowser:onMenuSelect(item)
+    if item.is_back then
+        self:onReturn()
+    elseif item.is_series then
+        table.insert(self.paths, { id = item.item.id, name = item.item.name })
+        self.current_series_id = item.item.id
+        self:load_and_render()
+    elseif item.is_book then
+        self:on_book_selected(item.item)
+    end
+    return true
+end
+
+function FolioBrowser:onReturn()
+    if #self.paths > 0 then
+        table.remove(self.paths)
+        if #self.paths > 0 then
+            self.current_series_id = self.paths[#self.paths].id
+        else
+            self.current_series_id = nil
+        end
+        self:load_and_render()
+        return true
+    else
+        if self.close_callback then
+            self.close_callback()
+        end
+        return true
+    end
 end
 
 function FolioBrowser:prompt_sort_by()
     local menu
     local item_table = {
         {
-            text = _("Sort by Name"),
+            text = _("Sort by Name") .. (self.sort_by == "name" and " ✓" or ""),
             callback = function()
                 UIManager:close(menu)
                 self.sort_by = "name"
@@ -211,7 +192,7 @@ function FolioBrowser:prompt_sort_by()
             end,
         },
         {
-            text = _("Sort by Recently Added"),
+            text = _("Sort by Recently Added") .. (self.sort_by == "recent" and " ✓" or ""),
             callback = function()
                 UIManager:close(menu)
                 self.sort_by = "recent"
@@ -220,7 +201,7 @@ function FolioBrowser:prompt_sort_by()
             end,
         },
         {
-            text = _("Sort by Series Order"),
+            text = _("Sort by Series Order") .. (self.sort_by == "sortOrder" and " ✓" or ""),
             callback = function()
                 UIManager:close(menu)
                 self.sort_by = "sortOrder"

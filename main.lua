@@ -21,11 +21,9 @@ function FolioSync:init()
     self.settings = self:load_settings()
     self.api = FolioAPI:new(self.settings)
     self.manager = Manager:new(self)
-    self.browser = FolioBrowser:new(self)
     self.menus = Menus:new(self)
 
     self.manager.ui = self.ui
-    self.browser.ui = self.ui
 
     -- Ensure the plugin is in the ReaderUI event chain
     if self.ui then
@@ -71,7 +69,6 @@ function FolioSync:onReaderReady()
     -- self.ui is already set by KOReader's WidgetContainer system before init()
     -- ReaderReady event has no arguments, so we must NOT overwrite self.ui
     self.manager.ui = self.ui
-    self.browser.ui = self.ui
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
     end
@@ -159,7 +156,20 @@ function FolioSync:onFolioSyncToggleAutoSync(enable)
 end
 
 function FolioSync:onFolioSyncBrowse()
-    self.browser:show()
+    local UIManager = require("ui/uimanager")
+    self.browser = FolioBrowser:new {
+        plugin = self,
+        api = self.api,
+        title = _("Folio Library"),
+        is_popout = false,
+        is_borderless = true,
+        title_bar_fm_style = true,
+        close_callback = function()
+            UIManager:close(self.browser)
+            self.browser = nil
+        end,
+    }
+    UIManager:show(self.browser)
     return true
 end
 

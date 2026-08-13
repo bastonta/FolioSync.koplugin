@@ -23,12 +23,11 @@ function Menus:get_menu_structure()
         sub_item_table_func = function()
             local items = {}
 
-            -- Only show browse on the main FileManager screen (no document open)
             if not self.plugin.ui.document then
                 table.insert(items, {
                     text = _("📚 Browse & Download Books from Folio"),
                     callback = function()
-                        self.plugin.browser:show()
+                        self.plugin:onFolioSyncBrowse()
                     end,
                 })
             end
