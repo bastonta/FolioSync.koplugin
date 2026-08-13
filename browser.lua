@@ -107,6 +107,21 @@ function FolioBrowser:render_menu(items, total)
         end,
     })
 
+    local max_page = math.max(1, math.ceil(total / self.limit))
+    if self.current_page > 1 then
+        table.insert(item_table, {
+            text = T(_("⬆️ Load Previous (Server Page %1 of %2)"), self.current_page - 1, max_page),
+            callback = function()
+                if self.current_menu then
+                    UIManager:close(self.current_menu)
+                    self.current_menu = nil
+                end
+                self.current_page = self.current_page - 1
+                self:load_and_render()
+            end,
+        })
+    end
+
     if #items == 0 then
         table.insert(item_table, {
             text = _("No items found in this location."),
@@ -146,14 +161,16 @@ function FolioBrowser:render_menu(items, total)
         end
     end
 
-    -- Pagination controls
-    local max_page = math.max(1, math.ceil(total / self.limit))
-    if max_page > 1 then
-        local nav_text = T(_("Page %1 of %2"), self.current_page, max_page)
+    if self.current_page < max_page then
         table.insert(item_table, {
-            text = "◀ Prev Page | " .. nav_text .. " | Next Page ▶",
+            text = T(_("⬇️ Load Next (Server Page %1 of %2)"), self.current_page + 1, max_page),
             callback = function()
-                self:prompt_pagination(max_page)
+                if self.current_menu then
+                    UIManager:close(self.current_menu)
+                    self.current_menu = nil
+                end
+                self.current_page = self.current_page + 1
+                self:load_and_render()
             end,
         })
     end
@@ -214,40 +231,6 @@ function FolioBrowser:prompt_sort_by()
     }
     menu = Menu:new {
         title = _("Select Sorting Order"),
-        item_table = item_table,
-        on_close = function()
-            UIManager:close(menu)
-        end,
-    }
-    UIManager:show(menu)
-end
-
-function FolioBrowser:prompt_pagination(max_page)
-    local menu
-    local item_table = {}
-    if self.current_page > 1 then
-        table.insert(item_table, {
-            text = _("◀ Previous Page"),
-            callback = function()
-                UIManager:close(menu)
-                self.current_page = self.current_page - 1
-                self:load_and_render()
-            end,
-        })
-    end
-    if self.current_page < max_page then
-        table.insert(item_table, {
-            text = _("Next Page ▶"),
-            callback = function()
-                UIManager:close(menu)
-                self.current_page = self.current_page + 1
-                self:load_and_render()
-            end,
-        })
-    end
-
-    menu = Menu:new {
-        title = _("Select Page"),
         item_table = item_table,
         on_close = function()
             UIManager:close(menu)
