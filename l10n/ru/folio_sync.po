@@ -427,3 +427,64 @@ msgstr "Введите API-ключ, сгенерированный в ваше�
 #: menus.lua:210
 msgid "API Key saved!"
 msgstr "API-ключ сохранён!"
+
+#: browser.lua:411
+msgid "✗ Mark as Unread on Folio"
+msgstr "✗ Пометить как непрочитанную на Folio"
+
+#: browser.lua:418
+msgid "✓ Mark as Read on Folio"
+msgstr "✓ Пометить как прочитанную на Folio"
+
+#: browser.lua:426
+msgid "Actions for '%1'"
+msgstr "Действия для «%1»"
+
+#: browser.lua:439
+msgid "book"
+msgstr "книги"
+
+#: browser.lua:447
+msgid "Marked '%1' as read on Folio."
+msgstr "Книга «%1» отмечена как прочитанная на Folio."
+
+#: browser.lua:448
+msgid "Marked '%1' as unread on Folio."
+msgstr "С книги «%1» снята отметка о прочтении на Folio."
+
+#: browser.lua:462
+msgid "Failed to update read status on Folio."
+msgstr "Не удалось обновить статус прочтения на Folio."
+
+#: main.lua:141
+msgid "FolioSync: Toggle read / finished status"
+msgstr "FolioSync: Переключить статус прочтения"
+
+#: manager.lua:1259
+msgid "Marked as Read"
+msgstr "Прочитано"
+
+#: menus.lua:55
+msgid "✓ Toggle Read Status on Folio"
+msgstr "✓ Переключить статус прочтения на Folio"
+
+#: menus.lua:242
+msgid "Marked as read locally."
+msgstr "Помечено как прочитанное локально."
+
+#: menus.lua:242
+msgid "Marked as unread locally."
+msgstr "Помечено как непрочитанное локально."
+
+#: menus.lua:250
+msgid "Marked as read on Folio and device."
+msgstr "Помечено как прочитанное на Folio и устройстве."
+
+#: menus.lua:251
+msgid "Marked as unread on Folio and device."
+msgstr "Помечено как непрочитанное на Folio и устройстве."
+
+#: menus.lua:254
+msgid "Updated locally, but failed to sync to Folio."
+msgstr "Обновлено локально, но не удалось синхронизировать с Folio."
+

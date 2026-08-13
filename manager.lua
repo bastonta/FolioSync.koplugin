@@ -21,7 +21,7 @@ end
 -- Load sync state snapshot from <book>.sdr/folio_sync_state.json
 function Manager:load_sync_state(file_path)
     local empty = { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {} }
-    if not file_path or file_path == "" then return empty end
+    if not file_path or type(file_path) ~= "string" or file_path == "" then return empty end
 
     local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
     if not sdr_dir then return empty end
@@ -45,8 +45,10 @@ function Manager:load_sync_state(file_path)
 end
 
 -- Save sync state snapshot to <book>.sdr/folio_sync_state.json
-function Manager:save_sync_state(state, file_path)
-    if not file_path or file_path == "" then return false end
+function Manager:save_sync_state(state_or_path, file_path_or_state)
+    local state = type(state_or_path) == "table" and state_or_path or file_path_or_state
+    local file_path = type(state_or_path) == "string" and state_or_path or file_path_or_state
+    if not file_path or type(file_path) ~= "string" or file_path == "" or type(state) ~= "table" then return false end
     local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
     if not sdr_dir then return false end
 
@@ -275,6 +277,17 @@ function Manager:get_doc_info(ui, document)
         percent = percent * 100
     end
 
+    local is_read = false
+    if docsettings and docsettings.readSetting then
+        local summary = docsettings:readSetting("summary")
+        if summary and summary.status == "complete" then
+            is_read = true
+        end
+    end
+    if not is_read and percent >= 100 then
+        is_read = true
+    end
+
     return {
         file = file_path,
         file_path = file_path,
@@ -283,10 +296,79 @@ function Manager:get_doc_info(ui, document)
         current_page = current_page,
         location = location,
         percent = percent,
+        is_read = is_read,
         docsettings = docsettings,
         ui = target_ui,
         document = target_doc,
     }
+end
+
+-- Check if document is marked as read/finished locally in KOReader
+function Manager:get_doc_read_status(info)
+    if not info then return false end
+    if info.docsettings and info.docsettings.readSetting then
+        local summary = info.docsettings:readSetting("summary")
+        if summary and summary.status then
+            if summary.status == "complete" then
+                return true
+            elseif summary.status == "reading" or summary.status == "abandoned" then
+                return false
+            end
+        end
+    end
+    local ok_bl, BookList = pcall(require, "ui/widget/booklist")
+    if ok_bl and BookList and BookList.getBookStatus and (info.file or info.file_path) then
+        local status = BookList.getBookStatus(info.file or info.file_path)
+        if status == "complete" then
+            return true
+        elseif status == "reading" or status == "abandoned" then
+            return false
+        end
+    end
+    if info.percent and info.percent >= 100 then
+        return true
+    end
+    return false
+end
+
+-- Update KOReader local sidecar and BookList cache read status
+function Manager:set_local_read_status(info_or_file, is_read, docsettings)
+    local file_path = nil
+    local ds = docsettings
+    if type(info_or_file) == "table" then
+        file_path = info_or_file.file or info_or_file.file_path
+        ds = ds or info_or_file.docsettings
+    elseif type(info_or_file) == "string" then
+        file_path = info_or_file
+    end
+
+    local status = is_read and "complete" or "reading"
+
+    -- 1. Update docsettings
+    if not ds and file_path then
+        local ok_ds, DocSettings = pcall(require, "docsettings")
+        if ok_ds and DocSettings and DocSettings.open then
+            pcall(function() ds = DocSettings:open(file_path) end)
+        end
+    end
+
+    if ds and ds.readSetting and ds.saveSetting then
+        local summary = ds:readSetting("summary") or {}
+        summary.status = status
+        summary.modified = os.date("%Y-%m-%d", os.time())
+        ds:saveSetting("summary", summary)
+        if ds.flush then
+            pcall(function() ds:flush() end)
+        end
+    end
+
+    -- 2. Update KOReader BookList cache
+    if file_path then
+        local ok_bl, BookList = pcall(require, "ui/widget/booklist")
+        if ok_bl and BookList and BookList.setBookInfoCacheProperty then
+            pcall(function() BookList.setBookInfoCacheProperty(file_path, "status", status) end)
+        end
+    end
 end
 
 -- Get or resolve Folio book_id for current document
@@ -399,12 +481,23 @@ function Manager:sync_progress(ui, document, is_silent)
 
         local percent = info.percent
         local location = info.location
+        local is_read = self:get_doc_read_status(info)
 
         -- Fetch remote progress first
         self.api:get_progress(book_id, function(success, remote_data)
             local should_push = true
-            if success and remote_data and (remote_data.progressPercent or remote_data.progress_percent) then
+            if success and remote_data then
                 local remote_percent = remote_data.progressPercent or remote_data.progress_percent or 0
+                local remote_is_read = remote_data.isRead
+                if remote_is_read == nil then remote_is_read = remote_data.is_read end
+
+                -- If remote is marked as read and local is not marked as complete, update local status
+                if remote_is_read == true and not is_read then
+                    logger.info("FolioSync: remote book marked as read, updating local status to complete")
+                    self:set_local_read_status(info, true, info.docsettings)
+                    is_read = true
+                end
+
                 if remote_percent > percent and not is_silent then
                     logger.info(string.format("FolioSync: remote progress (%d%%) ahead of local (%d%%)",
                         math.floor(remote_percent), math.floor(percent)))
@@ -412,7 +505,7 @@ function Manager:sync_progress(ui, document, is_silent)
             end
 
             if should_push then
-                self.api:update_progress(book_id, location, percent, function(push_ok)
+                self.api:update_progress(book_id, location, percent, is_read, function(push_ok)
                     if push_ok and not is_silent then
                         utils.show_msg(T(_("Progress synced to Folio (%1%)"), math.floor(percent)))
                     end
@@ -1000,10 +1093,11 @@ function Manager:push_all_data(ui, document, force_manual)
 
         local percent = info.percent
         local location = info.location
+        local is_read = self:get_doc_read_status(info)
 
-        logger.info("FolioSync Manager: local progress: " .. percent .. ", location: " .. location)
+        logger.info("FolioSync Manager: local progress: " .. percent .. ", location: " .. location .. ", is_read: " .. tostring(is_read))
 
-        self.api:update_progress(book_id, location, percent, function(push_prog_ok)
+        self.api:update_progress(book_id, location, percent, is_read, function(push_prog_ok)
             self:sync_annotations_and_bookmarks(ui, document, false)
             if force_manual then
                 if push_prog_ok then
@@ -1149,13 +1243,21 @@ function Manager:pull_all_data(ui, document, force_manual)
                 if remote_percent and tonumber(remote_percent) then
                     remote_percent = tonumber(remote_percent)
                 end
+                local remote_is_read = remote_data.isRead
+                if remote_is_read == nil then remote_is_read = remote_data.is_read end
+
                 local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or
                     self.ui
                 local target_doc = info.document or (target_ui and target_ui.document) or document
 
-                self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc)
+                if remote_pos and remote_pos ~= "" then
+                    self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc)
+                end
 
-                if remote_percent then
+                if remote_is_read == true then
+                    self:set_local_read_status(info, true, info.docsettings)
+                    progress_msg = _("Marked as Read")
+                elseif remote_percent then
                     progress_msg = T(_("Progress: %1%"), math.floor(remote_percent))
                 end
             end

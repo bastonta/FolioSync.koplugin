@@ -137,6 +137,8 @@ function FolioSync:onDispatcherRegisterActions()
         { category = "none", event = "FolioSyncPushDoc", title = _("FolioSync: Push document data to server"), reader = true, })
     Dispatcher:registerAction("foliosync_pull_doc",
         { category = "none", event = "FolioSyncPullDoc", title = _("FolioSync: Pull document data from server"), reader = true, })
+    Dispatcher:registerAction("foliosync_toggle_read",
+        { category = "none", event = "FolioSyncToggleRead", title = _("FolioSync: Toggle read / finished status"), reader = true, })
     Dispatcher:registerAction("foliosync_sync_doc",
         { category = "none", event = "FolioSyncCurrentDoc", title = _("FolioSync: Sync active document"), reader = true, separator = true, })
     Dispatcher:registerAction("foliosync_browse",
@@ -180,6 +182,11 @@ end
 
 function FolioSync:onFolioSyncPullDoc()
     self.manager:pull_all_data(self:get_ui(), nil, true)
+    return true
+end
+
+function FolioSync:onFolioSyncToggleRead()
+    self.menus:toggle_active_doc_read_status()
     return true
 end
 

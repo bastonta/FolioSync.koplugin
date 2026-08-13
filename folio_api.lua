@@ -337,14 +337,27 @@ function FolioAPI:get_progress(book_id, callback)
     return false
 end
 
-function FolioAPI:update_progress(book_id, location, progress_percent, callback)
+function FolioAPI:update_progress(book_id, location, progress_percent, is_read, callback)
+    if type(is_read) == "function" and callback == nil then
+        callback = is_read
+        is_read = nil
+    end
+
     local base_url = self:get_server_url()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/progress?format=xpointer"
 
-    local payload = json.encode({
-        location = location or "",
-        progressPercent = progress_percent or 0.0,
-    })
+    local body_tab = {}
+    if location ~= nil then
+        body_tab.location = location
+    end
+    if progress_percent ~= nil then
+        body_tab.progressPercent = progress_percent
+    end
+    if is_read ~= nil then
+        body_tab.isRead = is_read
+    end
+
+    local payload = json.encode(body_tab)
 
     local http = get_http_client()
     if not http then
@@ -366,6 +379,10 @@ function FolioAPI:update_progress(book_id, location, progress_percent, callback)
 
     if callback then callback(false, "HTTP " .. tostring(code)) end
     return false
+end
+
+function FolioAPI:set_read_status(book_id, is_read, callback)
+    return self:update_progress(book_id, nil, nil, is_read, callback)
 end
 
 function FolioAPI:list_annotations(book_id, callback)

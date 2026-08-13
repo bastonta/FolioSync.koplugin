@@ -50,6 +50,14 @@ function Menus:get_menu_structure()
                     self.plugin.manager:sync_annotations_and_bookmarks(self.plugin:get_ui(), nil, true)
                 end,
             })
+            if self.plugin.ui and self.plugin.ui.document then
+                table.insert(items, {
+                    text = _("✓ Toggle Read Status on Folio"),
+                    callback = function()
+                        self:toggle_active_doc_read_status()
+                    end,
+                })
+            end
             table.insert(items, {
                 text = _("⚙️ Settings & Account"),
                 sub_item_table = self:get_settings_sub_menu(),
@@ -214,6 +222,39 @@ function Menus:prompt_api_key()
         },
     }
     UIManager:show(dialog)
+end
+
+function Menus:toggle_active_doc_read_status()
+    local ui = self.plugin:get_ui()
+    local doc = ui and ui.document
+    local info = self.plugin.manager:get_doc_info(ui, doc)
+    if not info then
+        utils.show_msg(_("No active document open."))
+        return
+    end
+
+    local current_read = self.plugin.manager:get_doc_read_status(info)
+    local target_read = not current_read
+
+    self.plugin.manager:resolve_book_id(ui, doc, function(book_id)
+        if not book_id then
+            self.plugin.manager:set_local_read_status(info, target_read, info.docsettings)
+            local msg = target_read and _("Marked as read locally.") or _("Marked as unread locally.")
+            utils.show_msg(msg)
+            return
+        end
+
+        self.api:update_progress(book_id, info.location, info.percent, target_read, function(success)
+            self.plugin.manager:set_local_read_status(info, target_read, info.docsettings)
+            if success then
+                local msg = target_read and _("Marked as read on Folio and device.")
+                    or _("Marked as unread on Folio and device.")
+                utils.show_msg(msg)
+            else
+                utils.show_msg(_("Updated locally, but failed to sync to Folio."))
+            end
+        end)
+    end)
 end
 
 return Menus

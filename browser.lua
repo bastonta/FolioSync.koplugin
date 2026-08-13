@@ -121,9 +121,11 @@ function FolioBrowser:fetch_items(append)
                     item = item,
                 })
             else
+                local is_read = item.progress and (item.progress.isRead or item.progress.is_read)
+                local prefix = is_read and "✅ " or "📖 "
                 local author = item.author or ""
-                local display_text = (author ~= "") and string.format("📖 %s - %s", name, author) or
-                    string.format("📖 %s", name)
+                local display_text = (author ~= "") and string.format("%s%s - %s", prefix, name, author) or
+                    string.format("%s%s", prefix, name)
 
                 table.insert(self.item_table, {
                     text = display_text,
@@ -386,6 +388,7 @@ end
 function FolioBrowser:on_book_selected(book)
     local book_title = book.name or book.title or "book"
     local default_dir = self.plugin.settings.download_dir
+    local is_read = book.progress and (book.progress.isRead or book.progress.is_read)
 
     local menu
     local item_table = {
@@ -403,14 +406,62 @@ function FolioBrowser:on_book_selected(book)
         },
     }
 
+    if is_read then
+        table.insert(item_table, {
+            text = _("✗ Mark as Unread on Folio"),
+            callback = function()
+                self:toggle_book_read_status(book, false, menu)
+            end,
+        })
+    else
+        table.insert(item_table, {
+            text = _("✓ Mark as Read on Folio"),
+            callback = function()
+                self:toggle_book_read_status(book, true, menu)
+            end,
+        })
+    end
+
     menu = Menu:new {
-        title = T(_("Download '%1'"), book_title),
+        title = T(_("Actions for '%1'"), book_title),
         item_table = item_table,
         on_close = function()
             UIManager:close(menu)
         end,
     }
     UIManager:show(menu)
+end
+
+function FolioBrowser:toggle_book_read_status(book, is_read, parent_menu)
+    if parent_menu then
+        UIManager:close(parent_menu)
+    end
+    local book_title = book.name or book.title or _("book")
+    self.api:update_progress(book.id, nil, nil, is_read, function(success)
+        if success then
+            if not book.progress then
+                book.progress = {}
+            end
+            book.progress.isRead = is_read
+            book.progress.is_read = is_read
+            local msg = is_read and T(_("Marked '%1' as read on Folio."), book_title)
+                or T(_("Marked '%1' as unread on Folio."), book_title)
+            utils.show_msg(msg)
+
+            -- Also try to update local document if it's already downloaded on device
+            local default_dir = self.plugin.settings.download_dir
+            local filename = utils.sanitize_filename(book_title) .. ".epub"
+            local local_path = default_dir .. "/" .. filename
+            if self.plugin.manager and self.plugin.manager.set_local_read_status then
+                self.plugin.manager:set_local_read_status(local_path, is_read)
+            end
+
+            -- Re-render browser to update checkmarks
+            self:load_and_render()
+        else
+            utils.show_msg(_("Failed to update read status on Folio."))
+        end
+    end)
 end
 
 function FolioBrowser:prompt_custom_download_dir(book, current_dir)
