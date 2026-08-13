@@ -18,6 +18,8 @@ function FolioBrowser:new(plugin_instance)
         current_page = 1,
         limit = 15,
         sort_by = "name",
+        current_menu = nil,
+        request_id = 0,
     }
     setmetatable(o, self)
     self.__index = self
@@ -47,7 +49,13 @@ function FolioBrowser:load_and_render()
 
     local offset = (self.current_page - 1) * self.limit
 
+    self.request_id = self.request_id + 1
+    local current_request = self.request_id
+
     self.api:browse(self.current_series_id, self.sort_by, offset, self.limit, function(success, response)
+        -- If the user closed the browser while loading, abort rendering
+        if current_request ~= self.request_id then return end
+
         if not success or not response then
             UIManager:show(InfoMessage:new {
                 text = _("Failed to load library from Folio server."),
@@ -73,6 +81,10 @@ function FolioBrowser:render_menu(items, total)
         table.insert(item_table, {
             text = T(_("📁 .. (Back from %1)"), current_name),
             callback = function()
+                if self.current_menu then
+                    UIManager:close(self.current_menu)
+                    self.current_menu = nil
+                end
                 table.remove(self.series_stack)
                 if #self.series_stack > 0 then
                     self.current_series_id = self.series_stack[#self.series_stack].id
@@ -109,6 +121,10 @@ function FolioBrowser:render_menu(items, total)
                 table.insert(item_table, {
                     text = string.format("📁 [Series] %s", name),
                     callback = function()
+                        if self.current_menu then
+                            UIManager:close(self.current_menu)
+                            self.current_menu = nil
+                        end
                         table.insert(self.series_stack, { id = item.id, name = name })
                         self.current_series_id = item.id
                         self.current_page = 1
@@ -144,20 +160,34 @@ function FolioBrowser:render_menu(items, total)
 
     local location_title = (#self.series_stack > 0) and self.series_stack[#self.series_stack].name or _("Folio Library")
     local title_str = T(_("%1 (%2 items)"), location_title, total)
-    local menu = Menu:new {
+    local menu
+    menu = Menu:new {
         title = title_str,
         item_table = item_table,
-        on_close = function() end,
+        on_close = function()
+            UIManager:close(menu)
+            if self.current_menu == menu then
+                self.current_menu = nil
+                self.request_id = self.request_id + 1
+            end
+        end,
     }
+
+    if self.current_menu then
+        UIManager:close(self.current_menu)
+    end
+    self.current_menu = menu
 
     UIManager:show(menu)
 end
 
 function FolioBrowser:prompt_sort_by()
+    local menu
     local item_table = {
         {
             text = _("Sort by Name"),
             callback = function()
+                UIManager:close(menu)
                 self.sort_by = "name"
                 self.current_page = 1
                 self:load_and_render()
@@ -166,6 +196,7 @@ function FolioBrowser:prompt_sort_by()
         {
             text = _("Sort by Recently Added"),
             callback = function()
+                UIManager:close(menu)
                 self.sort_by = "recent"
                 self.current_page = 1
                 self:load_and_render()
@@ -174,25 +205,31 @@ function FolioBrowser:prompt_sort_by()
         {
             text = _("Sort by Series Order"),
             callback = function()
+                UIManager:close(menu)
                 self.sort_by = "sortOrder"
                 self.current_page = 1
                 self:load_and_render()
             end,
         },
     }
-    local menu = Menu:new {
+    menu = Menu:new {
         title = _("Select Sorting Order"),
         item_table = item_table,
+        on_close = function()
+            UIManager:close(menu)
+        end,
     }
     UIManager:show(menu)
 end
 
 function FolioBrowser:prompt_pagination(max_page)
+    local menu
     local item_table = {}
     if self.current_page > 1 then
         table.insert(item_table, {
             text = _("◀ Previous Page"),
             callback = function()
+                UIManager:close(menu)
                 self.current_page = self.current_page - 1
                 self:load_and_render()
             end,
@@ -202,15 +239,19 @@ function FolioBrowser:prompt_pagination(max_page)
         table.insert(item_table, {
             text = _("Next Page ▶"),
             callback = function()
+                UIManager:close(menu)
                 self.current_page = self.current_page + 1
                 self:load_and_render()
             end,
         })
     end
 
-    local menu = Menu:new {
+    menu = Menu:new {
         title = _("Select Page"),
         item_table = item_table,
+        on_close = function()
+            UIManager:close(menu)
+        end,
     }
     UIManager:show(menu)
 end
@@ -219,6 +260,7 @@ function FolioBrowser:on_book_selected(book)
     local book_title = book.name or book.title or "book"
     local default_dir = self.plugin.settings.download_dir
 
+    local menu
     local item_table = {
         {
             text = T(_("📥 Download to default folder (%1)"), default_dir),
@@ -234,9 +276,12 @@ function FolioBrowser:on_book_selected(book)
         },
     }
 
-    local menu = Menu:new {
+    menu = Menu:new {
         title = T(_("Download '%1'"), book_title),
         item_table = item_table,
+        on_close = function()
+            UIManager:close(menu)
+        end,
     }
     UIManager:show(menu)
 end
@@ -324,6 +369,10 @@ function FolioBrowser:start_download(book, download_dir)
 
             self.api:download_book(book.id, target_path, function(success, res)
                 if success then
+                    -- Trigger a filemanager refresh so the downloaded book appears immediately
+                    local Event = require("ui/event")
+                    UIManager:broadcastEvent(Event:new("Refresh"))
+
                     local open_box = ConfirmBox:new {
                         text = T(_("'%1' downloaded successfully to:\n%2\n\nDo you want to open it now?"), book_title, download_dir),
                         ok_text = _("Open Book"),
