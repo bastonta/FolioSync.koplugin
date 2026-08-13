@@ -13,6 +13,8 @@ local FolioBrowser = Menu:extend {
     current_page = 1,
     limit = 15,
     sort_by = "name",
+    search_query = nil,
+    search_by = nil,
     request_id = 0,
 }
 
@@ -61,6 +63,13 @@ function FolioBrowser:fetch_items(append)
                 is_back = true,
             })
         end
+
+        if self.search_query and self.search_query ~= "" then
+            table.insert(self.item_table, {
+                text = T(_("🔍 Filter: \"%1\" (Tap to clear)"), self.search_query),
+                is_clear_search = true,
+            })
+        end
     else
         self.current_page = self.current_page + 1
     end
@@ -68,7 +77,7 @@ function FolioBrowser:fetch_items(append)
     local current_request = self.request_id
     local offset = (self.current_page - 1) * self.limit
 
-    local success, response = self.api:browse(self.current_series_id, self.sort_by, offset, self.limit)
+    local success, response = self.api:browse(self.current_series_id, self.sort_by, offset, self.limit, self.search_query, self.search_by)
     self.is_loading = false
 
     -- If the user closed or changed directory while loading, abort rendering
@@ -125,7 +134,12 @@ function FolioBrowser:fetch_items(append)
     end
 
     local location_title = (#self.paths > 0) and self.paths[#self.paths].name or _("Folio Library")
-    local title_str = T(_("%1 (%2 items)"), location_title, total)
+    local title_str
+    if self.search_query and self.search_query ~= "" then
+        title_str = T(_("%1 [Search: '%2'] (%3 items)"), location_title, self.search_query, total)
+    else
+        title_str = T(_("%1 (%2 items)"), location_title, total)
+    end
 
     self:switchItemTable(title_str, self.item_table, append and -1 or nil)
     return true
@@ -149,7 +163,11 @@ function FolioBrowser:onNextPage(fill_only)
 end
 
 function FolioBrowser:onMenuSelect(item)
-    if item.is_back then
+    if item.is_clear_search then
+        self.search_query = nil
+        self.current_page = 1
+        self:load_and_render()
+    elseif item.is_back then
         self:onReturn()
     elseif item.is_series then
         table.insert(self.paths, { id = item.item.id, name = item.item.name })
@@ -179,39 +197,183 @@ function FolioBrowser:onReturn()
     end
 end
 
-function FolioBrowser:prompt_sort_by()
+function FolioBrowser:prompt_search()
+    local dialog
+    dialog = InputDialog:new {
+        title = _("Search Library"),
+        input = self.search_query or "",
+        hint = _("Enter search query..."),
+        description = _("Search books and series in Folio library"),
+        buttons = {
+            {
+                {
+                    text = _("Clear"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self.search_query = nil
+                        self.current_page = 1
+                        self:load_and_render()
+                    end,
+                },
+                {
+                    text = _("Cancel"),
+                    id = "cancel",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = _("Search"),
+                    is_default = true,
+                    callback = function()
+                        local query = dialog:getInputText()
+                        UIManager:close(dialog)
+                        if query and query ~= "" then
+                            self.search_query = query
+                        else
+                            self.search_query = nil
+                        end
+                        self.current_page = 1
+                        self:load_and_render()
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+end
+
+function FolioBrowser:prompt_search_by()
     local menu
+    local current = self.search_by or "all"
     local item_table = {
         {
-            text = _("Sort by Name") .. (self.sort_by == "name" and " ✓" or ""),
+            text = _("Search in All fields") .. (current == "all" and " ✓" or ""),
             callback = function()
                 UIManager:close(menu)
-                self.sort_by = "name"
-                self.current_page = 1
-                self:load_and_render()
+                self.search_by = "all"
+                if self.search_query and self.search_query ~= "" then
+                    self.current_page = 1
+                    self:load_and_render()
+                end
             end,
         },
         {
-            text = _("Sort by Recently Added") .. (self.sort_by == "recent" and " ✓" or ""),
+            text = _("Search in Book Titles") .. (current == "title" and " ✓" or ""),
             callback = function()
                 UIManager:close(menu)
-                self.sort_by = "recent"
-                self.current_page = 1
-                self:load_and_render()
+                self.search_by = "title"
+                if self.search_query and self.search_query ~= "" then
+                    self.current_page = 1
+                    self:load_and_render()
+                end
             end,
         },
         {
-            text = _("Sort by Series Order") .. (self.sort_by == "sortOrder" and " ✓" or ""),
+            text = _("Search in Authors") .. (current == "author" and " ✓" or ""),
             callback = function()
                 UIManager:close(menu)
-                self.sort_by = "sortOrder"
-                self.current_page = 1
-                self:load_and_render()
+                self.search_by = "author"
+                if self.search_query and self.search_query ~= "" then
+                    self.current_page = 1
+                    self:load_and_render()
+                end
+            end,
+        },
+        {
+            text = _("Search in Series Names") .. (current == "series" and " ✓" or ""),
+            callback = function()
+                UIManager:close(menu)
+                self.search_by = "series"
+                if self.search_query and self.search_query ~= "" then
+                    self.current_page = 1
+                    self:load_and_render()
+                end
             end,
         },
     }
     menu = Menu:new {
-        title = _("Select Sorting Order"),
+        title = _("Select Search Target"),
+        item_table = item_table,
+        on_close = function()
+            UIManager:close(menu)
+        end,
+    }
+    UIManager:show(menu)
+end
+
+function FolioBrowser:prompt_sort_by()
+    local menu
+    local search_by_label = _("All")
+    if self.search_by == "title" then
+        search_by_label = _("Titles")
+    elseif self.search_by == "author" then
+        search_by_label = _("Authors")
+    elseif self.search_by == "series" then
+        search_by_label = _("Series")
+    end
+
+    local item_table = {
+        {
+            text = (self.search_query and self.search_query ~= "")
+                and T(_("🔍 Search: '%1'"), self.search_query)
+                or _("🔍 Search Library..."),
+            callback = function()
+                UIManager:close(menu)
+                self:prompt_search()
+            end,
+        },
+        {
+            text = T(_("🎯 Search Target: %1"), search_by_label),
+            callback = function()
+                UIManager:close(menu)
+                self:prompt_search_by()
+            end,
+        },
+    }
+
+    if self.search_query and self.search_query ~= "" then
+        table.insert(item_table, {
+            text = _("❌ Clear Search"),
+            callback = function()
+                UIManager:close(menu)
+                self.search_query = nil
+                self.current_page = 1
+                self:load_and_render()
+            end,
+        })
+    end
+
+    table.insert(item_table, {
+        text = _("Sort by Name") .. (self.sort_by == "name" and " ✓" or ""),
+        callback = function()
+            UIManager:close(menu)
+            self.sort_by = "name"
+            self.current_page = 1
+            self:load_and_render()
+        end,
+    })
+    table.insert(item_table, {
+        text = _("Sort by Recently Added") .. (self.sort_by == "recent" and " ✓" or ""),
+        callback = function()
+            UIManager:close(menu)
+            self.sort_by = "recent"
+            self.current_page = 1
+            self:load_and_render()
+        end,
+    })
+    table.insert(item_table, {
+        text = _("Sort by Series Order") .. (self.sort_by == "sortOrder" and " ✓" or ""),
+        callback = function()
+            UIManager:close(menu)
+            self.sort_by = "sortOrder"
+            self.current_page = 1
+            self:load_and_render()
+        end,
+    })
+
+    menu = Menu:new {
+        title = _("Library Menu"),
         item_table = item_table,
         on_close = function()
             UIManager:close(menu)

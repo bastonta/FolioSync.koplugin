@@ -114,6 +114,38 @@ describe("FolioSync API Key Authentication", function()
         assert.is_equal("secret_key_xyz", headers["X-API-Key"])
         assert.is_equal("application/json", headers["Content-Type"])
     end)
+
+    it("formats browse URL with search and searchBy query parameters", function()
+        local requested_url = nil
+        package.loaded["socket.http"] = {
+            request = function(req)
+                requested_url = req.url
+                return "{\"items\":[],\"total\":0}", 200, {}
+            end
+        }
+        package.loaded["ltn12"] = {
+            sink = {
+                table = function(t)
+                    return function(chunk)
+                        if chunk then table.insert(t, chunk) end
+                        return 1
+                    end
+                end
+            }
+        }
+
+        package.loaded["folio_api"] = nil
+        local FolioAPI = require("folio_api")
+        local api = FolioAPI:new({ server_url = "http://localhost:8080", api_key = "key123" })
+
+        local ok, res = api:browse("series1", "recent", 0, 20, "Dune", "title")
+        assert.is_true(ok)
+        assert.is_not_nil(requested_url)
+        assert.is_true(requested_url:find("search=Dune") ~= nil)
+        assert.is_true(requested_url:find("searchBy=title") ~= nil)
+        assert.is_true(requested_url:find("seriesId=series1") ~= nil)
+        assert.is_true(requested_url:find("sortBy=recent") ~= nil)
+    end)
 end)
 
 describe("FolioSync Menu Structure", function()

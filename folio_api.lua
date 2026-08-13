@@ -179,7 +179,7 @@ function FolioAPI:find_book_by_hash(file_hash, callback)
     return false, msg
 end
 
-function FolioAPI:browse(series_id, sort_by, offset, limit, callback)
+function FolioAPI:browse(series_id, sort_by, offset, limit, search, search_by, callback)
     local base_url = self:get_server_url()
     offset = offset or 0
     limit = limit or 20
@@ -190,6 +190,12 @@ function FolioAPI:browse(series_id, sort_by, offset, limit, callback)
     end
     if sort_by and sort_by ~= "" then
         query = query .. "&sortBy=" .. tostring(sort_by)
+    end
+    if search and search ~= "" then
+        query = query .. "&search=" .. urlencode(search)
+    end
+    if search_by and search_by ~= "" then
+        query = query .. "&searchBy=" .. urlencode(search_by)
     end
 
     local url = base_url .. "/browse?" .. query
