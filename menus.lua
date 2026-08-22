@@ -104,6 +104,16 @@ function Menus:get_settings_sub_menu()
             end,
         },
         {
+            text = _("Automatically Create Series Folders"),
+            checked_func = function()
+                return self.plugin.settings.create_series_folders ~= false
+            end,
+            callback = function()
+                self.plugin.settings.create_series_folders = not (self.plugin.settings.create_series_folders ~= false)
+                self.plugin:save_settings()
+            end,
+        },
+        {
             text = _("Auto-sync Reading Progress"),
             checked_func = function()
                 return self.plugin.settings.auto_progress_sync == true

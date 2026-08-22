@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: FolioSync 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-14 02:07+0500\n"
+"POT-Creation-Date: 2026-08-23 01:42+0500\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -55,7 +55,7 @@ msgstr ""
 msgid "Untitled"
 msgstr ""
 
-#: browser.lua:139 main.lua:165
+#: browser.lua:139 main.lua:182
 msgid "Folio Library"
 msgstr ""
 
@@ -83,8 +83,8 @@ msgstr ""
 msgid "Clear"
 msgstr ""
 
-#: browser.lua:222 browser.lua:476 browser.lua:524 menus.lua:135 menus.lua:167
-#: menus.lua:201
+#: browser.lua:222 browser.lua:606 browser.lua:657 menus.lua:145 menus.lua:177
+#: menus.lua:211
 msgid "Cancel"
 msgstr ""
 
@@ -152,75 +152,79 @@ msgstr ""
 msgid "Sort by Series Order"
 msgstr ""
 
-#: browser.lua:379
+#: browser.lua:378
+msgid "Create Series Folders"
+msgstr ""
+
+#: browser.lua:387
 msgid "Library Menu"
 msgstr ""
 
-#: browser.lua:396
+#: browser.lua:519
 msgid "📥 Download to default folder (%1)"
 msgstr ""
 
-#: browser.lua:402
+#: browser.lua:525
 msgid "📁 Choose custom download folder..."
 msgstr ""
 
-#: browser.lua:411
+#: browser.lua:534
 msgid "✗ Mark as Unread on Folio"
 msgstr ""
 
-#: browser.lua:418
+#: browser.lua:541
 msgid "✓ Mark as Read on Folio"
 msgstr ""
 
-#: browser.lua:426
+#: browser.lua:549
 msgid "Actions for '%1'"
 msgstr ""
 
-#: browser.lua:439
+#: browser.lua:562
 msgid "book"
 msgstr ""
 
-#: browser.lua:447
+#: browser.lua:570
 msgid "Marked '%1' as read on Folio."
 msgstr ""
 
-#: browser.lua:448
+#: browser.lua:571
 msgid "Marked '%1' as unread on Folio."
 msgstr ""
 
-#: browser.lua:462
+#: browser.lua:592
 msgid "Failed to update read status on Folio."
 msgstr ""
 
-#: browser.lua:470
+#: browser.lua:600
 msgid "Custom Download Folder"
 msgstr ""
 
-#: browser.lua:472
+#: browser.lua:602
 msgid "Enter folder path on device to save this book:"
 msgstr ""
 
-#: browser.lua:483 browser.lua:523
+#: browser.lua:613 browser.lua:656
 msgid "Download"
 msgstr ""
 
-#: browser.lua:516
+#: browser.lua:649
 msgid "'%1' already exists in '%2'. Redownload from Folio?"
 msgstr ""
 
-#: browser.lua:518
+#: browser.lua:651
 msgid "Download '%1' to '%2'?"
 msgstr ""
 
-#: browser.lua:523
+#: browser.lua:656
 msgid "Redownload"
 msgstr ""
 
-#: browser.lua:544
+#: browser.lua:662
 msgid "Downloading '%1'..."
 msgstr ""
 
-#: browser.lua:555
+#: browser.lua:673
 msgid ""
 "'%1' downloaded successfully to:\n"
 "%2\n"
@@ -228,69 +232,78 @@ msgid ""
 "Do you want to open it now?"
 msgstr ""
 
-#: browser.lua:556
+#: browser.lua:674
 msgid "Open Book"
 msgstr ""
 
-#: browser.lua:557
+#: browser.lua:675
 msgid "Close"
 msgstr ""
 
-#: browser.lua:568
+#: browser.lua:686
 msgid "Failed to download book: %1"
 msgstr ""
 
-#: main.lua:129
+#: main.lua:132
 msgid "FolioSync: Set auto progress sync"
 msgstr ""
 
-#: main.lua:132
+#: main.lua:135
 msgid "on"
 msgstr ""
 
-#: main.lua:132
+#: main.lua:135
 msgid "off"
 msgstr ""
 
-#: main.lua:135
+#: main.lua:138
 msgid "FolioSync: Toggle auto progress sync"
 msgstr ""
 
-#: main.lua:137
+#: main.lua:140
+msgid "FolioSync: Toggle create series folders"
+msgstr ""
+
+#: main.lua:142
 msgid "FolioSync: Push document data to server"
 msgstr ""
 
-#: main.lua:139
+#: main.lua:144
 msgid "FolioSync: Pull document data from server"
 msgstr ""
 
-#: main.lua:141
+#: main.lua:146
 msgid "FolioSync: Toggle read / finished status"
 msgstr ""
 
-#: main.lua:143
+#: main.lua:148
 msgid "FolioSync: Sync active document"
 msgstr ""
 
-#: main.lua:145
+#: main.lua:150
 msgid "FolioSync: Browse library"
 msgstr ""
 
-#: main.lua:155
+#: main.lua:160 main.lua:172
 msgid "ON"
 msgstr ""
 
-#: main.lua:155
+#: main.lua:160 main.lua:172
 msgid "OFF"
 msgstr ""
 
-#: main.lua:156
+#: main.lua:161
 #, lua-format
 msgid "Auto progress sync: %s"
 msgstr ""
 
+#: main.lua:173
+#, lua-format
+msgid "Create series folders: %s"
+msgstr ""
+
 #: manager.lua:469 manager.lua:531 manager.lua:1077 manager.lua:1221
-#: menus.lua:232
+#: menus.lua:242
 msgid "No active document open."
 msgstr ""
 
@@ -411,69 +424,73 @@ msgid "Download Folder: %1"
 msgstr ""
 
 #: menus.lua:107
+msgid "Automatically Create Series Folders"
+msgstr ""
+
+#: menus.lua:117
 msgid "Auto-sync Reading Progress"
 msgstr ""
 
-#: menus.lua:119
+#: menus.lua:129
 msgid "Version: %1"
 msgstr ""
 
-#: menus.lua:129
+#: menus.lua:139
 msgid "Folio Server URL"
 msgstr ""
 
-#: menus.lua:131
+#: menus.lua:141
 msgid "Enter the base URL of your self-hosted Folio backend."
 msgstr ""
 
-#: menus.lua:142 menus.lua:174 menus.lua:208
+#: menus.lua:152 menus.lua:184 menus.lua:218
 msgid "Save"
 msgstr ""
 
-#: menus.lua:149
+#: menus.lua:159
 msgid "Server URL saved!"
 msgstr ""
 
-#: menus.lua:161
+#: menus.lua:171
 msgid "Download Folder Path"
 msgstr ""
 
-#: menus.lua:163
+#: menus.lua:173
 msgid "Location on device where downloaded books will be stored."
 msgstr ""
 
-#: menus.lua:181
+#: menus.lua:191
 msgid "Download folder path updated."
 msgstr ""
 
-#: menus.lua:195
+#: menus.lua:205
 msgid "Folio API Key"
 msgstr ""
 
-#: menus.lua:197
+#: menus.lua:207
 msgid "Enter API key generated from your Folio profile."
 msgstr ""
 
-#: menus.lua:218
+#: menus.lua:228
 msgid "API Key saved!"
 msgstr ""
 
-#: menus.lua:242
+#: menus.lua:252
 msgid "Marked as read locally."
 msgstr ""
 
-#: menus.lua:242
+#: menus.lua:252
 msgid "Marked as unread locally."
 msgstr ""
 
-#: menus.lua:250
+#: menus.lua:260
 msgid "Marked as read on Folio and device."
 msgstr ""
 
-#: menus.lua:251
+#: menus.lua:261
 msgid "Marked as unread on Folio and device."
 msgstr ""
 
-#: menus.lua:254
+#: menus.lua:264
 msgid "Updated locally, but failed to sync to Folio."
 msgstr ""

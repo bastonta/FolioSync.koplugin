@@ -97,6 +97,9 @@ function FolioSync:load_settings()
     if data.auto_progress_sync == nil then
         data.auto_progress_sync = false
     end
+    if data.create_series_folders == nil then
+        data.create_series_folders = true
+    end
     return data
 end
 
@@ -133,6 +136,8 @@ function FolioSync:onDispatcherRegisterActions()
         })
     Dispatcher:registerAction("foliosync_toggle_autosync",
         { category = "none", event = "FolioSyncToggleAutoSync", title = _("FolioSync: Toggle auto progress sync"), general = true, })
+    Dispatcher:registerAction("foliosync_toggle_series_folders",
+        { category = "none", event = "FolioSyncToggleSeriesFolders", title = _("FolioSync: Toggle create series folders"), general = true, })
     Dispatcher:registerAction("foliosync_push_doc",
         { category = "none", event = "FolioSyncPushDoc", title = _("FolioSync: Push document data to server"), reader = true, })
     Dispatcher:registerAction("foliosync_pull_doc",
@@ -154,6 +159,18 @@ function FolioSync:onFolioSyncToggleAutoSync(enable)
     self:save_settings()
     local status = self.settings.auto_progress_sync and _("ON") or _("OFF")
     utils.show_msg(string.format(_("Auto progress sync: %s"), status))
+    return true
+end
+
+function FolioSync:onFolioSyncToggleSeriesFolders(enable)
+    if enable == nil then
+        self.settings.create_series_folders = not (self.settings.create_series_folders ~= false)
+    else
+        self.settings.create_series_folders = enable
+    end
+    self:save_settings()
+    local status = (self.settings.create_series_folders ~= false) and _("ON") or _("OFF")
+    utils.show_msg(string.format(_("Create series folders: %s"), status))
     return true
 end
 

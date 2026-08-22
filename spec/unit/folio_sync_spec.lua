@@ -144,6 +144,15 @@ describe("FolioSync Annotation Conversion", function()
         assert.is_equal("War & Peace", clean2)
     end)
 
+    it("builds book target directories correctly with series and subseries", function()
+        local base = "/sdcard/books/FolioSync"
+        assert.is_equal("/sdcard/books/FolioSync", utils.build_book_target_dir(base, nil))
+        assert.is_equal("/sdcard/books/FolioSync", utils.build_book_target_dir(base, ""))
+        assert.is_equal("/sdcard/books/FolioSync/Harry Potter", utils.build_book_target_dir(base, "Harry Potter"))
+        assert.is_equal("/sdcard/books/FolioSync/Cosmere/Stormlight Archive", utils.build_book_target_dir(base, "Cosmere/Stormlight Archive"))
+        assert.is_equal("/sdcard/books/FolioSync/Sci-Fi_ Space/Book Series", utils.build_book_target_dir(base, "Sci-Fi: Space/Book Series"))
+    end)
+
     it("trims slashes from URLs properly", function()
         assert.is_equal("http://localhost:8080", utils.trim_slash("http://localhost:8080/"))
         assert.is_equal("http://localhost:8080", utils.trim_slash("http://localhost:8080///"))
@@ -390,7 +399,7 @@ describe("FolioSync Menu Structure", function()
 end)
 
 describe("FolioSync Gesture Actions Registration", function()
-    it("registers set_autosync, toggle_autosync, push, pull, toggle_read, sync, and browse actions", function()
+    it("registers set_autosync, toggle_autosync, toggle_series_folders, push, pull, toggle_read, sync, and browse actions", function()
         local registered_actions = {}
         package.loaded["dispatcher"] = {
             registerAction = function(self, action_id, def)
@@ -410,6 +419,7 @@ describe("FolioSync Gesture Actions Registration", function()
 
         assert.is_not_nil(registered_actions["foliosync_set_autosync"])
         assert.is_not_nil(registered_actions["foliosync_toggle_autosync"])
+        assert.is_not_nil(registered_actions["foliosync_toggle_series_folders"])
         assert.is_not_nil(registered_actions["foliosync_push_doc"])
         assert.is_not_nil(registered_actions["foliosync_pull_doc"])
         assert.is_not_nil(registered_actions["foliosync_toggle_read"])
@@ -417,3 +427,126 @@ describe("FolioSync Gesture Actions Registration", function()
         assert.is_not_nil(registered_actions["foliosync_browse"])
     end)
 end)
+
+describe("FolioSync Series and Subseries Resolution", function()
+    local FolioBrowser = require("browser")
+
+    it("resolves direct series and nested subseries paths", function()
+        local fake_api = {
+            get_series = function(self)
+                return true, {
+                    { id = "s1", name = "Fantasy Universe", parentId = nil },
+                    { id = "s2", name = "The Archive Saga", parentId = "s1" },
+                    { id = "s3", name = "Standalone Series", parentId = nil },
+                }
+            end,
+            get_book = function(self, book_id)
+                if book_id == "b1" then
+                    return true, {
+                        id = "b1",
+                        title = "Book 1",
+                        series = {
+                            { id = "s2", name = "The Archive Saga", parentId = "s1" }
+                        }
+                    }
+                elseif book_id == "b2" then
+                    return true, {
+                        id = "b2",
+                        title = "Book 2",
+                        series = {
+                            { id = "s3", name = "Standalone Series", parentId = nil }
+                        }
+                    }
+                elseif book_id == "b3" then
+                    return true, {
+                        id = "b3",
+                        title = "Book 3",
+                        series = {}
+                    }
+                end
+                return false, "not found"
+            end,
+        }
+
+        local fake_plugin = {
+            settings = {
+                create_series_folders = true,
+                download_dir = "/sdcard/books/FolioSync",
+            }
+        }
+
+        local browser = setmetatable({
+            api = fake_api,
+            plugin = fake_plugin,
+            paths = {},
+        }, { __index = FolioBrowser })
+
+        -- Nested series (s1 -> s2)
+        local path1 = browser:resolve_series_path({ id = "b1", title = "Book 1" })
+        assert.is_equal("Fantasy Universe/The Archive Saga", path1)
+
+        -- Single standalone series
+        local path2 = browser:resolve_series_path({ id = "b2", title = "Book 2" })
+        assert.is_equal("Standalone Series", path2)
+
+        -- No series, empty breadcrumbs -> nil
+        local path3 = browser:resolve_series_path({ id = "b3", title = "Book 3" })
+        assert.is_nil(path3)
+
+        -- No series, but user is currently browsing inside a series folder
+        browser.paths = { { id = "s_active", name = "Active Folder" } }
+        local path4 = browser:resolve_series_path({ id = "b3", title = "Book 3" })
+        assert.is_equal("Active Folder", path4)
+
+        -- When create_series_folders is false -> returns nil
+        fake_plugin.settings.create_series_folders = false
+        browser.paths = {}
+        local path5 = browser:resolve_series_path({ id = "b1", title = "Book 1" })
+        assert.is_nil(path5)
+    end)
+
+    it("matches active breadcrumb folder when book has multiple series", function()
+        local fake_api = {
+            get_series = function(self)
+                return true, {
+                    { id = "s1", name = "Author Collection", parentId = nil },
+                    { id = "s2", name = "Trilogy A", parentId = "s1" },
+                    { id = "s3", name = "Anthology B", parentId = nil },
+                }
+            end,
+            get_book = function(self, book_id)
+                return true, {
+                    id = "b_multi",
+                    title = "Crossover Book",
+                    series = {
+                        { id = "s2", name = "Trilogy A", parentId = "s1" },
+                        { id = "s3", name = "Anthology B", parentId = nil },
+                    }
+                }
+            end,
+        }
+
+        local fake_plugin = {
+            settings = {
+                create_series_folders = true,
+                download_dir = "/sdcard/books/FolioSync",
+            }
+        }
+
+        local browser = setmetatable({
+            api = fake_api,
+            plugin = fake_plugin,
+            paths = { { id = "s3", name = "Anthology B" } },
+        }, { __index = FolioBrowser })
+
+        -- Matches active folder "Anthology B"
+        local matched_path = browser:resolve_series_path({ id = "b_multi", title = "Crossover Book" })
+        assert.is_equal("Anthology B", matched_path)
+
+        -- When at root (no active folder), picks longest candidate path ("Author Collection/Trilogy A")
+        browser.paths = {}
+        local longest_path = browser:resolve_series_path({ id = "b_multi", title = "Crossover Book" })
+        assert.is_equal("Author Collection/Trilogy A", longest_path)
+    end)
+end)
+

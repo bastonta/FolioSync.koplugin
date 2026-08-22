@@ -266,6 +266,74 @@ function FolioAPI:list_books(page, limit, search, callback)
     return false, msg
 end
 
+function FolioAPI:get_book(book_id, callback)
+    local base_url = self:get_server_url()
+    local url = base_url .. "/books/" .. tostring(book_id)
+
+    local http = get_http_client()
+    if not http then
+        if callback then callback(false, "HTTP client unavailable") end
+        return false, "HTTP client unavailable"
+    end
+
+    local response, err = http.get(url, self:get_headers())
+    if not response then
+        if callback then callback(false, tostring(err)) end
+        return false, tostring(err)
+    end
+
+    local code = response.code or response.status or 0
+    local body = response.body or response.content or ""
+
+    if code >= 200 and code < 300 then
+        local ok, data = pcall(json.decode, body)
+        if ok and data then
+            if callback then callback(true, data) end
+            return true, data
+        end
+    end
+
+    local msg = "Failed to get book details (HTTP " .. tostring(code) .. ")"
+    if callback then callback(false, msg) end
+    return false, msg
+end
+
+function FolioAPI:get_series(search, callback)
+    local base_url = self:get_server_url()
+    local query = ""
+    if search and search ~= "" then
+        query = "?search=" .. urlencode(search)
+    end
+    local url = base_url .. "/series" .. query
+
+    local http = get_http_client()
+    if not http then
+        if callback then callback(false, "HTTP client unavailable") end
+        return false, "HTTP client unavailable"
+    end
+
+    local response, err = http.get(url, self:get_headers())
+    if not response then
+        if callback then callback(false, tostring(err)) end
+        return false, tostring(err)
+    end
+
+    local code = response.code or response.status or 0
+    local body = response.body or response.content or ""
+
+    if code >= 200 and code < 300 then
+        local ok, data = pcall(json.decode, body)
+        if ok and type(data) == "table" then
+            if callback then callback(true, data) end
+            return true, data
+        end
+    end
+
+    local msg = "Failed to get series list (HTTP " .. tostring(code) .. ")"
+    if callback then callback(false, msg) end
+    return false, msg
+end
+
 function FolioAPI:download_book(book_id, save_path, callback)
     local base_url = self:get_server_url()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/download"

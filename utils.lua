@@ -90,4 +90,45 @@ function M.clean_cfi(cfi)
     return clean
 end
 
+function M.build_book_target_dir(base_dir, series_path)
+    local target = M.trim_slash(base_dir or "")
+    if not series_path or series_path == "" then
+        return target
+    end
+
+    for part in series_path:gmatch("[^/\\]+") do
+        local clean_part = M.sanitize_filename(part)
+        if clean_part ~= "" and clean_part ~= "unnamed_book" then
+            if target == "" then
+                target = clean_part
+            else
+                target = target .. "/" .. clean_part
+            end
+        end
+    end
+    return target
+end
+
+function M.ensure_dir(dir_path)
+    if not dir_path or dir_path == "" then return false end
+    local ok_lfs, lfs_mod = pcall(require, "lfs")
+    if ok_lfs and lfs_mod and lfs_mod.mkdir then
+        local path_acc = ""
+        for part in dir_path:gmatch("[^/\\]+") do
+            if dir_path:sub(1, 1) == "/" and path_acc == "" then
+                path_acc = "/" .. part
+            else
+                path_acc = path_acc == "" and part or (path_acc .. "/" .. part)
+            end
+            lfs_mod.mkdir(path_acc)
+        end
+        return true
+    else
+        local clean_dir = dir_path:gsub('["`$\\]', "\\%1")
+        os.execute("mkdir -p \"" .. clean_dir .. "\"")
+        return true
+    end
+end
+
 return M
+

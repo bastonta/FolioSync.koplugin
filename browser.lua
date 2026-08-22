@@ -374,6 +374,14 @@ function FolioBrowser:prompt_sort_by()
             self:load_and_render()
         end,
     })
+    table.insert(item_table, {
+        text = _("Create Series Folders") .. (self.plugin.settings.create_series_folders ~= false and " ✓" or ""),
+        callback = function()
+            UIManager:close(menu)
+            self.plugin.settings.create_series_folders = not (self.plugin.settings.create_series_folders ~= false)
+            self.plugin:save_settings()
+        end,
+    })
 
     menu = Menu:new {
         title = _("Library Menu"),
@@ -383,6 +391,121 @@ function FolioBrowser:prompt_sort_by()
         end,
     }
     UIManager:show(menu)
+end
+
+function FolioBrowser:get_series_map()
+    if self._series_map then
+        return self._series_map
+    end
+    local map = {}
+    local success, list = self.api:get_series()
+    if success and type(list) == "table" then
+        for _, s in ipairs(list) do
+            if s.id then
+                map[s.id] = s
+            end
+        end
+    end
+    self._series_map = map
+    return map
+end
+
+function FolioBrowser:resolve_series_path(book)
+    if self.plugin and self.plugin.settings and self.plugin.settings.create_series_folders == false then
+        return nil
+    end
+
+    local current_breadcrumb_names = {}
+    if self.paths and #self.paths > 0 then
+        for _, p in ipairs(self.paths) do
+            if p.name and p.name ~= "" then
+                table.insert(current_breadcrumb_names, p.name)
+            end
+        end
+    end
+
+    local book_id = book and book.id
+    if not book_id then
+        if #current_breadcrumb_names > 0 then
+            return table.concat(current_breadcrumb_names, "/")
+        end
+        return nil
+    end
+
+    local success, book_detail = self.api:get_book(book_id)
+    local series_map = self:get_series_map()
+
+    local series_list = (success and book_detail and type(book_detail.series) == "table") and book_detail.series or {}
+    if #series_list == 0 then
+        if #current_breadcrumb_names > 0 then
+            return table.concat(current_breadcrumb_names, "/")
+        end
+        return nil
+    end
+
+    local function get_ancestor_path(series_id)
+        local path = {}
+        local curr_id = series_id
+        local visited = {}
+
+        while curr_id and not visited[curr_id] do
+            visited[curr_id] = true
+            local s = series_map[curr_id]
+            if not s then
+                for _, bs in ipairs(series_list) do
+                    if bs.id == curr_id then
+                        table.insert(path, 1, bs.name)
+                        curr_id = bs.parentId or bs.parent_id
+                        s = bs
+                        break
+                    end
+                end
+                if not s then
+                    break
+                end
+            else
+                table.insert(path, 1, s.name)
+                curr_id = s.parentId or s.parent_id
+            end
+        end
+        return path
+    end
+
+    local candidate_paths = {}
+    for _, s in ipairs(series_list) do
+        local p = get_ancestor_path(s.id)
+        if #p > 0 then
+            table.insert(candidate_paths, p)
+        elseif s.name and s.name ~= "" then
+            table.insert(candidate_paths, { s.name })
+        end
+    end
+
+    if #candidate_paths == 0 then
+        if #current_breadcrumb_names > 0 then
+            return table.concat(current_breadcrumb_names, "/")
+        end
+        return nil
+    end
+
+    -- If currently inside a folder, find candidate path that contains active folder name
+    if self.paths and #self.paths > 0 then
+        local active_name = self.paths[#self.paths].name
+        for _, p in ipairs(candidate_paths) do
+            for _, name in ipairs(p) do
+                if name == active_name then
+                    return table.concat(p, "/")
+                end
+            end
+        end
+    end
+
+    -- Otherwise pick the longest / most specific hierarchy path
+    table.sort(candidate_paths, function(a, b)
+        return #a > #b
+    end)
+
+    return table.concat(candidate_paths[1], "/")
 end
 
 function FolioBrowser:on_book_selected(book)
@@ -450,10 +573,17 @@ function FolioBrowser:toggle_book_read_status(book, is_read, parent_menu)
 
             -- Also try to update local document if it's already downloaded on device
             local default_dir = self.plugin.settings.download_dir
-            local filename = utils.sanitize_filename(book_title) .. ".epub"
-            local local_path = default_dir .. "/" .. filename
+            local clean_title = utils.sanitize_filename(book_title)
+            local clean_author = utils.sanitize_filename(book.author or "")
+            local filename = clean_author ~= "" and (clean_title .. " - " .. clean_author .. ".epub") or (clean_title .. ".epub")
+            local series_path = self:resolve_series_path(book)
+            local target_dir = utils.build_book_target_dir(default_dir, series_path)
+            local local_path = target_dir .. "/" .. filename
             if self.plugin.manager and self.plugin.manager.set_local_read_status then
                 self.plugin.manager:set_local_read_status(local_path, is_read)
+                if target_dir ~= default_dir then
+                    self.plugin.manager:set_local_read_status(default_dir .. "/" .. filename, is_read)
+                end
             end
 
             -- Re-render browser to update checkmarks
@@ -501,7 +631,10 @@ function FolioBrowser:start_download(book, download_dir)
     local clean_title = utils.sanitize_filename(book_title)
     local clean_author = utils.sanitize_filename(book.author or "")
     local filename = clean_author ~= "" and (clean_title .. " - " .. clean_author .. ".epub") or (clean_title .. ".epub")
-    local target_path = download_dir .. "/" .. filename
+
+    local series_path = self:resolve_series_path(book)
+    local target_dir = utils.build_book_target_dir(download_dir, series_path)
+    local target_path = target_dir .. "/" .. filename
 
     -- Check if file already exists
     local file_exists = false
@@ -513,9 +646,9 @@ function FolioBrowser:start_download(book, download_dir)
 
     local confirm_text
     if file_exists then
-        confirm_text = T(_("'%1' already exists in '%2'. Redownload from Folio?"), filename, download_dir)
+        confirm_text = T(_("'%1' already exists in '%2'. Redownload from Folio?"), filename, target_dir)
     else
-        confirm_text = T(_("Download '%1' to '%2'?"), book_title, download_dir)
+        confirm_text = T(_("Download '%1' to '%2'?"), book_title, target_dir)
     end
 
     local confirm = ConfirmBox:new {
@@ -523,22 +656,7 @@ function FolioBrowser:start_download(book, download_dir)
         ok_text = file_exists and _("Redownload") or _("Download"),
         cancel_text = _("Cancel"),
         ok_callback = function()
-            -- Ensure directory exists safely
-            local ok_lfs, lfs_mod = pcall(require, "lfs")
-            if ok_lfs and lfs_mod and lfs_mod.mkdir then
-                local path_acc = ""
-                for part in download_dir:gmatch("[^/\\]+") do
-                    if download_dir:sub(1, 1) == "/" and path_acc == "" then
-                        path_acc = "/" .. part
-                    else
-                        path_acc = path_acc == "" and part or (path_acc .. "/" .. part)
-                    end
-                    lfs_mod.mkdir(path_acc)
-                end
-            else
-                local clean_dir = download_dir:gsub('["`$\\]', "\\%1")
-                os.execute("mkdir -p \"" .. clean_dir .. "\"")
-            end
+            utils.ensure_dir(target_dir)
 
             UIManager:show(InfoMessage:new {
                 text = T(_("Downloading '%1'..."), book_title),
@@ -552,7 +670,7 @@ function FolioBrowser:start_download(book, download_dir)
                     UIManager:broadcastEvent(Event:new("Refresh"))
 
                     local open_box = ConfirmBox:new {
-                        text = T(_("'%1' downloaded successfully to:\n%2\n\nDo you want to open it now?"), book_title, download_dir),
+                        text = T(_("'%1' downloaded successfully to:\n%2\n\nDo you want to open it now?"), book_title, target_dir),
                         ok_text = _("Open Book"),
                         cancel_text = _("Close"),
                         ok_callback = function()

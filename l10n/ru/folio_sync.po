@@ -155,6 +155,10 @@ msgstr "По дате добавления"
 msgid "Sort by Series Order"
 msgstr "По порядку серии"
 
+#: browser.lua:374
+msgid "Create Series Folders"
+msgstr "Создавать папки серий"
+
 #: browser.lua:376
 msgid "Library Menu"
 msgstr "Меню библиотеки"
@@ -235,11 +239,15 @@ msgstr "вкл"
 msgid "off"
 msgstr "выкл"
 
-#: main.lua:135
+#: main.lua:134
 msgid "FolioSync: Toggle auto progress sync"
 msgstr "FolioSync: Переключить автосинхронизацию прогресса"
 
-#: main.lua:137
+#: main.lua:136
+msgid "FolioSync: Toggle create series folders"
+msgstr "FolioSync: Переключить создание папок серий"
+
+#: main.lua:138
 msgid "FolioSync: Push document data to server"
 msgstr "FolioSync: Отправить данные документа на сервер"
 
@@ -267,6 +275,11 @@ msgstr "ВЫКЛ"
 #, lua-format
 msgid "Auto progress sync: %s"
 msgstr "Автосинхронизация прогресса: %s"
+
+#: main.lua:166
+#, lua-format
+msgid "Create series folders: %s"
+msgstr "Создание папок серий: %s"
 
 #: manager.lua:387 manager.lua:438 manager.lua:984 manager.lua:1127
 msgid "No active document open."
@@ -380,7 +393,11 @@ msgstr "API-ключ: Не задан (нажмите, чтобы ввести)"
 msgid "Download Folder: %1"
 msgstr "Папка загрузки: %1"
 
-#: menus.lua:99
+#: menus.lua:107
+msgid "Automatically Create Series Folders"
+msgstr "Автоматически создавать папки серий"
+
+#: menus.lua:117
 msgid "Auto-sync Reading Progress"
 msgstr "Автосинхронизация прогресса чтения"
 
