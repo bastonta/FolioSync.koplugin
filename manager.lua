@@ -1148,69 +1148,91 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
     if type(remote_pos) == "string" and remote_pos ~= "" and not remote_pos:match("^page_%d+$") then
         logger.info("FolioSync Manager: attempting jump to XPointer " .. tostring(remote_pos))
 
-        -- Check if XPointer is valid in the current document before calling onGotoLink
-        local valid_xp = nil
-        if doc and doc.isXPointerInDocument then
-            if doc:isXPointerInDocument(remote_pos) then
-                valid_xp = remote_pos
-            else
-                -- Try variations: convert trailing /text().0 to .0 or strip /text()
-                local candidate1 = remote_pos:gsub("/text%(%)(%b[])?%.%d+$", ".0")
-                local candidate2 = remote_pos:gsub("/text%(%)(%b[])?%.%d+$", "")
-                local candidate3 = remote_pos:gsub("/text%(%)(%b[])?$", "")
+        local target_page = nil
+        local best_xp = nil
 
-                if doc:isXPointerInDocument(candidate1) then
-                    valid_xp = candidate1
-                elseif doc:isXPointerInDocument(candidate2) then
-                    valid_xp = candidate2
-                elseif doc:isXPointerInDocument(candidate3) then
-                    valid_xp = candidate3
-                end
-            end
-        else
-            -- If isXPointerInDocument method is not available, assume valid
-            valid_xp = remote_pos
+        -- Generate candidate XPointers from most specific to least specific
+        local candidates = {}
+        table.insert(candidates, remote_pos)
+
+        -- 1. Try stripping /text().0 or /text()[N].offset
+        local no_text = remote_pos:gsub("/text%(%)(%b[])?%.%d+$", "")
+        if no_text ~= remote_pos then
+            table.insert(candidates, no_text)
+            table.insert(candidates, no_text .. ".0")
+        end
+        local text_dot0 = remote_pos:gsub("/text%(%)(%b[])?%.%d+$", ".0")
+        if text_dot0 ~= remote_pos and text_dot0 ~= no_text .. ".0" then
+            table.insert(candidates, text_dot0)
         end
 
-        if valid_xp then
-            -- Method A: KOReader's native ReaderLink widget (best precision: moves page AND scrolls to element)
-            if ui.link and ui.link.onGotoLink then
-                local ok, res = pcall(function() return ui.link:onGotoLink({ xpointer = valid_xp }) end)
-                if ok and (res == nil or res == true) then
-                    logger.info("FolioSync Manager: successfully jumped via ui.link:onGotoLink with " .. tostring(valid_xp))
-                    return true
+        -- 2. Progressively strip DOM segments from right to left
+        local trimmed = no_text
+        while true do
+            local parent = trimmed:match("^(.*)/[^/]+$")
+            if parent and parent:find("DocFragment") then
+                table.insert(candidates, parent)
+                table.insert(candidates, parent .. ".0")
+                trimmed = parent
+            else
+                break
+            end
+        end
+
+        -- 3. DocFragment root as ultimate chapter fallback
+        local doc_frag = remote_pos:match("(/body/DocFragment%[%d+%])") or remote_pos:match("(DocFragment%[%d+%])")
+        if doc_frag then
+            table.insert(candidates, doc_frag .. ".0")
+            table.insert(candidates, doc_frag)
+        end
+
+        -- Validate candidates against document DOM
+        if doc and doc.getPageFromXPointer then
+            for _, xp in ipairs(candidates) do
+                local ok, p = pcall(function() return doc:getPageFromXPointer(xp) end)
+                if ok and p and tonumber(p) and tonumber(p) > 0 then
+                    target_page = tonumber(p)
+                    best_xp = xp
+                    logger.info("FolioSync Manager: validated XPointer " .. tostring(xp) .. " -> page " .. tostring(target_page))
+                    break
                 end
             end
+        end
 
-            -- Method B: GotoPos event
+        local valid_xp = best_xp or remote_pos
+
+        -- Method A: KOReader's native ReaderLink widget (best precision: moves page AND scrolls to element)
+        if best_xp and ui.link and ui.link.onGotoLink then
+            local curr_page_before = doc and doc.getCurrentPage and doc:getCurrentPage()
+            local ok, res = pcall(function() return ui.link:onGotoLink({ xpointer = best_xp }) end)
+            local curr_page_after = doc and doc.getCurrentPage and doc:getCurrentPage()
+            if ok and (res == nil or res == true) and (not target_page or curr_page_after == target_page or (curr_page_before and curr_page_after ~= curr_page_before)) then
+                logger.info("FolioSync Manager: successfully jumped via ui.link:onGotoLink with " .. tostring(best_xp))
+                return true
+            end
+        end
+
+        -- Method B: GotoPos event
+        if best_xp then
             local ok_event, res_event = pcall(function()
-                local r1 = ui:handleEvent(Event:new("GotoPos", valid_xp))
-                local r2 = UIMgr:broadcastEvent(Event:new("GotoPos", valid_xp))
+                local r1 = ui:handleEvent(Event:new("GotoPos", best_xp))
+                local r2 = UIMgr:broadcastEvent(Event:new("GotoPos", best_xp))
                 return r1 or r2
             end)
             if ok_event and res_event then
                 logger.info("FolioSync Manager: successfully jumped via GotoPos event")
                 return true
             end
-        else
-            logger.warn("FolioSync Manager: XPointer not found in document DOM: " .. tostring(remote_pos))
         end
 
-        -- Method C: Resolve XPointer to page number as fallback (try both original and candidates)
-        if doc and doc.getPageFromXPointer then
-            local targets = { valid_xp, remote_pos }
-            for _, xp_target in ipairs(targets) do
-                if xp_target then
-                    local ok, page_num = pcall(function() return doc:getPageFromXPointer(xp_target) end)
-                    if ok and page_num and tonumber(page_num) and tonumber(page_num) > 0 then
-                        local target_page = tonumber(page_num)
-                        logger.info("FolioSync Manager: resolved XPointer fallback page " .. tostring(target_page))
-                        ui:handleEvent(Event:new("GotoPage", target_page))
-                        return true
-                    end
-                end
-            end
+        -- Method C: Direct page jump via validated target_page
+        if target_page and target_page > 0 then
+            logger.info("FolioSync Manager: jumping to validated page " .. tostring(target_page))
+            ui:handleEvent(Event:new("GotoPage", target_page))
+            return true
         end
+
+        logger.warn("FolioSync Manager: XPointer could not be resolved to any page: " .. tostring(remote_pos))
     end
 
     -- 3. Check if remote_pos is a page_N string (e.g. "page_15")
