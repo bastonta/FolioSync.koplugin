@@ -59,6 +59,30 @@ function FolioSync:init()
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
     end
+
+    -- Auto-check for updates in background (20s delay, 24h interval, Wi-Fi check)
+    if self.settings.auto_check_updates ~= false then
+        local last_check = G_reader_settings and G_reader_settings:readSetting("foliosync_last_update_check")
+        if type(last_check) == "number" and os.time() - last_check < 24 * 60 * 60 then
+            -- Checked within 24h
+        else
+            local UIManager = require("ui/uimanager")
+            UIManager:scheduleIn(20, function()
+                local NetworkMgr = require("ui/network/manager")
+                if not NetworkMgr:isWifiOn() then
+                    return
+                end
+                local ok, err = pcall(function()
+                    local UpdateChecker = require("update_checker")
+                    UpdateChecker.checkForUpdates(true)
+                end)
+                if not ok then
+                    local logger = require("logger")
+                    logger.warn("FolioSync: Auto update check failed:", err)
+                end
+            end)
+        end
+    end
 end
 
 function FolioSync:addToMainMenu(menu_items)
@@ -99,6 +123,9 @@ function FolioSync:load_settings()
     end
     if data.create_series_folders == nil then
         data.create_series_folders = true
+    end
+    if data.auto_check_updates == nil then
+        data.auto_check_updates = true
     end
     return data
 end
@@ -238,6 +265,14 @@ function FolioSync:onFolioSyncCurrentDoc()
     self.manager:pull_all_data(self:get_ui(), nil, false)
     self.manager:push_all_data(self:get_ui(), nil, true)
     return true
+end
+
+function FolioSync:checkForUpdates()
+    local NetworkMgr = require("ui/network/manager")
+    NetworkMgr:runWhenConnected(function()
+        local UpdateChecker = require("update_checker")
+        UpdateChecker.checkForUpdates(false)
+    end)
 end
 
 return FolioSync

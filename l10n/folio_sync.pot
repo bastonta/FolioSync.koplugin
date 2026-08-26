@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: FolioSync 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-23 01:42+0500\n"
+"POT-Creation-Date: 2026-08-26 23:22+0500\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,11 +17,11 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: _meta.lua:4 menus.lua:21
+#: _meta.lua:25 menus.lua:21 update_checker.lua:44
 msgid "Folio Sync & Library"
 msgstr ""
 
-#: _meta.lua:5
+#: _meta.lua:26
 msgid ""
 "Sync annotations, reading progress, and download books directly from your "
 "Folio server."
@@ -55,7 +55,7 @@ msgstr ""
 msgid "Untitled"
 msgstr ""
 
-#: browser.lua:139 main.lua:182
+#: browser.lua:139 main.lua:236
 msgid "Folio Library"
 msgstr ""
 
@@ -83,8 +83,8 @@ msgstr ""
 msgid "Clear"
 msgstr ""
 
-#: browser.lua:222 browser.lua:606 browser.lua:657 menus.lua:145 menus.lua:177
-#: menus.lua:211
+#: browser.lua:222 browser.lua:606 browser.lua:657 menus.lua:166 menus.lua:198
+#: menus.lua:232 update_checker.lua:225
 msgid "Cancel"
 msgstr ""
 
@@ -236,7 +236,7 @@ msgstr ""
 msgid "Open Book"
 msgstr ""
 
-#: browser.lua:675
+#: browser.lua:675 update_checker.lua:286
 msgid "Close"
 msgstr ""
 
@@ -244,70 +244,70 @@ msgstr ""
 msgid "Failed to download book: %1"
 msgstr ""
 
-#: main.lua:132
+#: main.lua:186
 msgid "FolioSync: Set auto progress sync"
 msgstr ""
 
-#: main.lua:135
+#: main.lua:189
 msgid "on"
 msgstr ""
 
-#: main.lua:135
+#: main.lua:189
 msgid "off"
 msgstr ""
 
-#: main.lua:138
+#: main.lua:192
 msgid "FolioSync: Toggle auto progress sync"
 msgstr ""
 
-#: main.lua:140
+#: main.lua:194
 msgid "FolioSync: Toggle create series folders"
 msgstr ""
 
-#: main.lua:142
+#: main.lua:196
 msgid "FolioSync: Push document data to server"
 msgstr ""
 
-#: main.lua:144
+#: main.lua:198
 msgid "FolioSync: Pull document data from server"
 msgstr ""
 
-#: main.lua:146
+#: main.lua:200
 msgid "FolioSync: Toggle read / finished status"
 msgstr ""
 
-#: main.lua:148
+#: main.lua:202
 msgid "FolioSync: Sync active document"
 msgstr ""
 
-#: main.lua:150
+#: main.lua:204
 msgid "FolioSync: Browse library"
 msgstr ""
 
-#: main.lua:160 main.lua:172
+#: main.lua:214 main.lua:226
 msgid "ON"
 msgstr ""
 
-#: main.lua:160 main.lua:172
+#: main.lua:214 main.lua:226
 msgid "OFF"
 msgstr ""
 
-#: main.lua:161
+#: main.lua:215
 #, lua-format
 msgid "Auto progress sync: %s"
 msgstr ""
 
-#: main.lua:173
+#: main.lua:227
 #, lua-format
 msgid "Create series folders: %s"
 msgstr ""
 
-#: manager.lua:469 manager.lua:531 manager.lua:1077 manager.lua:1221
-#: menus.lua:242
+#: manager.lua:469 manager.lua:531 manager.lua:1077 manager.lua:1276
+#: menus.lua:263
 msgid "No active document open."
 msgstr ""
 
-#: manager.lua:477 manager.lua:1085 manager.lua:1229
+#: manager.lua:477 manager.lua:1085 manager.lua:1284
 msgid "Document not matched on Folio server."
 msgstr ""
 
@@ -315,7 +315,7 @@ msgstr ""
 msgid "Progress synced to Folio (%1%)"
 msgstr ""
 
-#: manager.lua:522 manager.lua:1069 manager.lua:1213
+#: manager.lua:522 manager.lua:1069 manager.lua:1268
 msgid "Please set API Key in settings."
 msgstr ""
 
@@ -359,23 +359,23 @@ msgstr ""
 msgid "Failed to push progress to Folio."
 msgstr ""
 
-#: manager.lua:1235
+#: manager.lua:1290
 msgid "Fetching document data from Folio..."
 msgstr ""
 
-#: manager.lua:1259
+#: manager.lua:1314
 msgid "Marked as Read"
 msgstr ""
 
-#: manager.lua:1261
+#: manager.lua:1316
 msgid "Progress: %1%"
 msgstr ""
 
-#: manager.lua:1268
+#: manager.lua:1323
 msgid "Fetched remote data: %1"
 msgstr ""
 
-#: manager.lua:1269
+#: manager.lua:1324
 msgid "Up to date"
 msgstr ""
 
@@ -403,94 +403,275 @@ msgstr ""
 msgid "⚙️ Settings & Account"
 msgstr ""
 
-#: menus.lua:76
+#: menus.lua:79
 msgid "Not set"
 msgstr ""
 
-#: menus.lua:77
+#: menus.lua:80
 msgid "Server URL: %1"
 msgstr ""
 
-#: menus.lua:88
+#: menus.lua:91
 msgid "API Key: %1"
 msgstr ""
 
-#: menus.lua:90
+#: menus.lua:93
 msgid "API Key: Not Set (Tap to Enter API Key)"
 msgstr ""
 
-#: menus.lua:100
+#: menus.lua:103
 msgid "Download Folder: %1"
 msgstr ""
 
-#: menus.lua:107
+#: menus.lua:110
 msgid "Automatically Create Series Folders"
 msgstr ""
 
-#: menus.lua:117
+#: menus.lua:120
 msgid "Auto-sync Reading Progress"
 msgstr ""
 
-#: menus.lua:129
-msgid "Version: %1"
-msgstr ""
-
-#: menus.lua:139
-msgid "Folio Server URL"
+#: menus.lua:130
+msgid "Auto-check for Updates"
 msgstr ""
 
 #: menus.lua:141
+msgid "Check for Updates"
+msgstr ""
+
+#: menus.lua:148
+msgid "Version: %1 (Tap to check updates)"
+msgstr ""
+
+#: menus.lua:160
+msgid "Folio Server URL"
+msgstr ""
+
+#: menus.lua:162
 msgid "Enter the base URL of your self-hosted Folio backend."
 msgstr ""
 
-#: menus.lua:152 menus.lua:184 menus.lua:218
+#: menus.lua:173 menus.lua:205 menus.lua:239
 msgid "Save"
 msgstr ""
 
-#: menus.lua:159
+#: menus.lua:180
 msgid "Server URL saved!"
 msgstr ""
 
-#: menus.lua:171
+#: menus.lua:192
 msgid "Download Folder Path"
 msgstr ""
 
-#: menus.lua:173
+#: menus.lua:194
 msgid "Location on device where downloaded books will be stored."
 msgstr ""
 
-#: menus.lua:191
+#: menus.lua:212
 msgid "Download folder path updated."
 msgstr ""
 
-#: menus.lua:205
+#: menus.lua:226
 msgid "Folio API Key"
 msgstr ""
 
-#: menus.lua:207
+#: menus.lua:228
 msgid "Enter API key generated from your Folio profile."
 msgstr ""
 
-#: menus.lua:228
+#: menus.lua:249
 msgid "API Key saved!"
 msgstr ""
 
-#: menus.lua:252
+#: menus.lua:273
 msgid "Marked as read locally."
 msgstr ""
 
-#: menus.lua:252
+#: menus.lua:273
 msgid "Marked as unread locally."
 msgstr ""
 
-#: menus.lua:260
+#: menus.lua:281
 msgid "Marked as read on Folio and device."
 msgstr ""
 
-#: menus.lua:261
+#: menus.lua:282
 msgid "Marked as unread on Folio and device."
 msgstr ""
 
-#: menus.lua:264
+#: menus.lua:285
 msgid "Updated locally, but failed to sync to Folio."
+msgstr ""
+
+#: update_checker.lua:187
+msgid "Copy"
+msgstr ""
+
+#: update_checker.lua:192
+msgid "Link copied to clipboard"
+msgstr ""
+
+#: update_checker.lua:197
+msgid "Show QR code"
+msgstr ""
+
+#: update_checker.lua:213
+msgid "Open in browser"
+msgstr ""
+
+#: update_checker.lua:233
+msgid ""
+"External link:\n"
+"\n"
+"%1"
+msgstr ""
+
+#: update_checker.lua:253
+msgid "Release Notes"
+msgstr ""
+
+#: update_checker.lua:271
+msgid "No content."
+msgstr ""
+
+#: update_checker.lua:486
+msgid "New pre-release version available!"
+msgstr ""
+
+#: update_checker.lua:486
+msgid "New version available!"
+msgstr ""
+
+#: update_checker.lua:487
+msgid "Current"
+msgstr ""
+
+#: update_checker.lua:489
+msgid "Latest"
+msgstr ""
+
+#: update_checker.lua:491 update_checker.lua:1255
+msgid "No release notes available."
+msgstr ""
+
+#: update_checker.lua:499
+msgid "Later"
+msgstr ""
+
+#: update_checker.lua:505
+msgid "Visit Release Page"
+msgstr ""
+
+#: update_checker.lua:512
+msgid "Please visit:"
+msgstr ""
+
+#: update_checker.lua:525
+msgid "Update Now"
+msgstr ""
+
+#: update_checker.lua:535
+msgid "FolioSync Pre-release Update"
+msgstr ""
+
+#: update_checker.lua:535
+msgid "FolioSync Update Available"
+msgstr ""
+
+#: update_checker.lua:793
+msgid "Download timed out"
+msgstr ""
+
+#: update_checker.lua:845
+msgid "Failed to start download"
+msgstr ""
+
+#: update_checker.lua:873
+msgid "Downloaded file is empty"
+msgstr ""
+
+#: update_checker.lua:1000
+msgid ""
+"Auto-update is disabled for git-based installs. Please use git pull instead."
+msgstr ""
+
+#: update_checker.lua:1008
+msgid "No download URL available for this release. Please update manually."
+msgstr ""
+
+#: update_checker.lua:1016
+msgid "No network connection. Please connect and try again."
+msgstr ""
+
+#: update_checker.lua:1038
+msgid "Update failed: %1"
+msgstr ""
+
+#: update_checker.lua:1044
+msgid "Downloading FolioSync update %1..."
+msgstr ""
+
+#: update_checker.lua:1053
+msgid "Download failed"
+msgstr ""
+
+#: update_checker.lua:1058
+msgid "Installing FolioSync update %1..."
+msgstr ""
+
+#: update_checker.lua:1072
+msgid "Failed to extract update archive"
+msgstr ""
+
+#: update_checker.lua:1087
+msgid "Failed to move current plugin to backup"
+msgstr ""
+
+#: update_checker.lua:1097
+msgid ""
+"Failed to install update AND failed to restore previous version. Backup is "
+"at: "
+msgstr ""
+
+#: update_checker.lua:1099
+msgid "Failed to install new plugin version. Previous version restored."
+msgstr ""
+
+#: update_checker.lua:1110
+msgid ""
+"FolioSync updated to version %1.\n"
+"\n"
+"Please restart KOReader to use the new version."
+msgstr ""
+
+#: update_checker.lua:1142
+msgid "Checking for FolioSync updates..."
+msgstr ""
+
+#: update_checker.lua:1162
+msgid "Failed to check for updates (timed out). Please try again."
+msgstr ""
+
+#: update_checker.lua:1163
+msgid "Failed to check for updates. Please check your internet connection."
+msgstr ""
+
+#: update_checker.lua:1177
+msgid "Failed to check for updates: Empty response from server"
+msgstr ""
+
+#: update_checker.lua:1189
+msgid "Failed to check for updates: Invalid response format"
+msgstr ""
+
+#: update_checker.lua:1228
+msgid "No releases found"
+msgstr ""
+
+#: update_checker.lua:1265
+msgid "You are running the latest version of FolioSync (%1)"
+msgstr ""
+
+#: update_checker.lua:1272
+msgid "You are running a development version of FolioSync (%1)"
 msgstr ""

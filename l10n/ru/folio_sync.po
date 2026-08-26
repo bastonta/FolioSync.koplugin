@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: FolioSync 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-13 18:33+0500\n"
+"POT-Creation-Date: 2026-08-26 23:22+0500\n"
 "PO-Revision-Date: 2026-07-30 12:45+0500\n"
 "Last-Translator: \n"
 "Language-Team: Russian\n"
@@ -18,11 +18,11 @@ msgstr ""
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
 "n%10<=4 && (n%100<12 || n%100>14) ? 1 : 2);\n"
 
-#: _meta.lua:4 menus.lua:21
+#: _meta.lua:25 menus.lua:21 update_checker.lua:44
 msgid "Folio Sync & Library"
 msgstr "Folio — синхронизация и библиотека"
 
-#: _meta.lua:5
+#: _meta.lua:26
 msgid ""
 "Sync annotations, reading progress, and download books directly from your "
 "Folio server."
@@ -34,7 +34,7 @@ msgstr ""
 msgid "Please enter your Folio API Key in Settings."
 msgstr "Пожалуйста, введите API-ключ Folio в настройках."
 
-#: browser.lua:60 browser.lua:313
+#: browser.lua:60 browser.lua:316
 msgid "Series"
 msgstr "Серии"
 
@@ -46,164 +46,188 @@ msgstr "📁 .. (Назад из %1)"
 msgid "🔍 Filter: \"%1\" (Tap to clear)"
 msgstr "🔍 Фильтр: «%1» (нажмите для сброса)"
 
-#: browser.lua:89
+#: browser.lua:90
 msgid "Failed to load library from Folio server."
 msgstr "Не удалось загрузить библиотеку с сервера Folio."
 
-#: browser.lua:108
+#: browser.lua:109
 msgid "No items found in this location."
 msgstr "Элементы не найдены в этом разделе."
 
-#: browser.lua:114
+#: browser.lua:115
 msgid "Untitled"
 msgstr "Без названия"
 
-#: browser.lua:136 main.lua:163
+#: browser.lua:139 main.lua:236
 msgid "Folio Library"
 msgstr "Библиотека Folio"
 
-#: browser.lua:139
+#: browser.lua:142
 msgid "%1 [Search: '%2'] (%3 items)"
 msgstr "%1 [Поиск: «%2»] (%3 элементов)"
 
-#: browser.lua:141
+#: browser.lua:144
 msgid "%1 (%2 items)"
 msgstr "%1 (%2 элементов)"
 
-#: browser.lua:203
+#: browser.lua:206
 msgid "Search Library"
 msgstr "Поиск по библиотеке"
 
-#: browser.lua:205
+#: browser.lua:208
 msgid "Enter search query..."
 msgstr "Введите поисковый запрос…"
 
-#: browser.lua:206
+#: browser.lua:209
 msgid "Search books and series in Folio library"
 msgstr "Поиск книг и серий в библиотеке Folio"
 
-#: browser.lua:210
+#: browser.lua:213
 msgid "Clear"
 msgstr "Сбросить"
 
-#: browser.lua:219 browser.lua:424 browser.lua:472 menus.lua:127 menus.lua:159
-#: menus.lua:193
+#: browser.lua:222 browser.lua:606 browser.lua:657 menus.lua:166 menus.lua:198
+#: menus.lua:232 update_checker.lua:225
 msgid "Cancel"
 msgstr "Отмена"
 
-#: browser.lua:226
+#: browser.lua:229
 msgid "Search"
 msgstr "Искать"
 
-#: browser.lua:251
+#: browser.lua:254
 msgid "Search in All fields"
 msgstr "Поиск по всем полям"
 
-#: browser.lua:262
+#: browser.lua:265
 msgid "Search in Book Titles"
 msgstr "Поиск по названиям книг"
 
-#: browser.lua:273
+#: browser.lua:276
 msgid "Search in Authors"
 msgstr "Поиск по авторам"
 
-#: browser.lua:284
+#: browser.lua:287
 msgid "Search in Series Names"
 msgstr "Поиск по названиям серий"
 
-#: browser.lua:296
+#: browser.lua:299
 msgid "Select Search Target"
 msgstr "Выберите поле поиска"
 
-#: browser.lua:307
+#: browser.lua:310
 msgid "All"
 msgstr "Все поля"
 
-#: browser.lua:309
+#: browser.lua:312
 msgid "Titles"
 msgstr "Названия"
 
-#: browser.lua:311
+#: browser.lua:314
 msgid "Authors"
 msgstr "Авторы"
 
-#: browser.lua:319
+#: browser.lua:322
 msgid "🔍 Search: '%1'"
 msgstr "🔍 Поиск: «%1»"
 
-#: browser.lua:320
+#: browser.lua:323
 msgid "🔍 Search Library..."
 msgstr "🔍 Поиск по библиотеке…"
 
-#: browser.lua:327
+#: browser.lua:330
 msgid "🎯 Search Target: %1"
 msgstr "🎯 Поле поиска: %1"
 
-#: browser.lua:337
+#: browser.lua:340
 msgid "❌ Clear Search"
 msgstr "❌ Сбросить поиск"
 
-#: browser.lua:348
+#: browser.lua:351
 msgid "Sort by Name"
 msgstr "По названию"
 
-#: browser.lua:357
+#: browser.lua:360
 msgid "Sort by Recently Added"
 msgstr "По дате добавления"
 
-#: browser.lua:366
+#: browser.lua:369
 msgid "Sort by Series Order"
 msgstr "По порядку серии"
 
-#: browser.lua:374
+#: browser.lua:378
 msgid "Create Series Folders"
 msgstr "Создавать папки серий"
 
-#: browser.lua:376
+#: browser.lua:387
 msgid "Library Menu"
 msgstr "Меню библиотеки"
 
-#: browser.lua:392
+#: browser.lua:519
 msgid "📥 Download to default folder (%1)"
 msgstr "📥 Загрузить в папку по умолчанию (%1)"
 
-#: browser.lua:398
+#: browser.lua:525
 msgid "📁 Choose custom download folder..."
 msgstr "📁 Выбрать другую папку для загрузки…"
 
-#: browser.lua:406
-msgid "Download '%1'"
-msgstr "Загрузить «%1»"
+#: browser.lua:534
+msgid "✗ Mark as Unread on Folio"
+msgstr "✗ Пометить как непрочитанную на Folio"
 
-#: browser.lua:418
+#: browser.lua:541
+msgid "✓ Mark as Read on Folio"
+msgstr "✓ Пометить как прочитанную на Folio"
+
+#: browser.lua:549
+msgid "Actions for '%1'"
+msgstr "Действия для «%1»"
+
+#: browser.lua:562
+msgid "book"
+msgstr "книги"
+
+#: browser.lua:570
+msgid "Marked '%1' as read on Folio."
+msgstr "Книга «%1» отмечена как прочитанная на Folio."
+
+#: browser.lua:571
+msgid "Marked '%1' as unread on Folio."
+msgstr "С книги «%1» снята отметка о прочтении на Folio."
+
+#: browser.lua:592
+msgid "Failed to update read status on Folio."
+msgstr "Не удалось обновить статус прочтения на Folio."
+
+#: browser.lua:600
 msgid "Custom Download Folder"
 msgstr "Папка загрузки"
 
-#: browser.lua:420
+#: browser.lua:602
 msgid "Enter folder path on device to save this book:"
 msgstr "Введите путь к папке на устройстве для сохранения книги:"
 
-#: browser.lua:431 browser.lua:471
+#: browser.lua:613 browser.lua:656
 msgid "Download"
 msgstr "Загрузить"
 
-#: browser.lua:464
+#: browser.lua:649
 msgid "'%1' already exists in '%2'. Redownload from Folio?"
 msgstr "«%1» уже существует в «%2». Загрузить заново из Folio?"
 
-#: browser.lua:466
+#: browser.lua:651
 msgid "Download '%1' to '%2'?"
 msgstr "Загрузить «%1» в «%2»?"
 
-#: browser.lua:471
+#: browser.lua:656
 msgid "Redownload"
 msgstr "Загрузить заново"
 
-#: browser.lua:492
+#: browser.lua:662
 msgid "Downloading '%1'..."
 msgstr "Загрузка «%1»…"
 
-#: browser.lua:503
+#: browser.lua:673
 msgid ""
 "'%1' downloaded successfully to:\n"
 "%2\n"
@@ -215,141 +239,150 @@ msgstr ""
 "\n"
 "Открыть книгу сейчас?"
 
-#: browser.lua:504
+#: browser.lua:674
 msgid "Open Book"
 msgstr "Открыть книгу"
 
-#: browser.lua:505
+#: browser.lua:675 update_checker.lua:286
 msgid "Close"
 msgstr "Закрыть"
 
-#: browser.lua:516
+#: browser.lua:686
 msgid "Failed to download book: %1"
 msgstr "Не удалось загрузить книгу: %1"
 
-#: main.lua:129
+#: main.lua:186
 msgid "FolioSync: Set auto progress sync"
 msgstr "FolioSync: Установить автосинхронизацию прогресса"
 
-#: main.lua:132
+#: main.lua:189
 msgid "on"
 msgstr "вкл"
 
-#: main.lua:132
+#: main.lua:189
 msgid "off"
 msgstr "выкл"
 
-#: main.lua:134
+#: main.lua:192
 msgid "FolioSync: Toggle auto progress sync"
 msgstr "FolioSync: Переключить автосинхронизацию прогресса"
 
-#: main.lua:136
+#: main.lua:194
 msgid "FolioSync: Toggle create series folders"
 msgstr "FolioSync: Переключить создание папок серий"
 
-#: main.lua:138
+#: main.lua:196
 msgid "FolioSync: Push document data to server"
 msgstr "FolioSync: Отправить данные документа на сервер"
 
-#: main.lua:139
+#: main.lua:198
 msgid "FolioSync: Pull document data from server"
 msgstr "FolioSync: Получить данные документа с сервера"
 
-#: main.lua:141
+#: main.lua:200
+msgid "FolioSync: Toggle read / finished status"
+msgstr "FolioSync: Переключить статус прочтения"
+
+#: main.lua:202
 msgid "FolioSync: Sync active document"
 msgstr "FolioSync: Синхронизировать активный документ"
 
-#: main.lua:143
+#: main.lua:204
 msgid "FolioSync: Browse library"
 msgstr "FolioSync: Обзор библиотеки"
 
-#: main.lua:153
+#: main.lua:214 main.lua:226
 msgid "ON"
 msgstr "ВКЛ"
 
-#: main.lua:153
+#: main.lua:214 main.lua:226
 msgid "OFF"
 msgstr "ВЫКЛ"
 
-#: main.lua:154
+#: main.lua:215
 #, lua-format
 msgid "Auto progress sync: %s"
 msgstr "Автосинхронизация прогресса: %s"
 
-#: main.lua:166
+#: main.lua:227
 #, lua-format
 msgid "Create series folders: %s"
 msgstr "Создание папок серий: %s"
 
-#: manager.lua:387 manager.lua:438 manager.lua:984 manager.lua:1127
+#: manager.lua:469 manager.lua:531 manager.lua:1077 manager.lua:1276
+#: menus.lua:263
 msgid "No active document open."
 msgstr "Нет открытого документа."
 
-#: manager.lua:395 manager.lua:992 manager.lua:1135
+#: manager.lua:477 manager.lua:1085 manager.lua:1284
 msgid "Document not matched on Folio server."
 msgstr "Документ не найден на сервере Folio."
 
-#: manager.lua:417
+#: manager.lua:510
 msgid "Progress synced to Folio (%1%)"
 msgstr "Прогресс синхронизирован с Folio (%1%)"
 
-#: manager.lua:429 manager.lua:976 manager.lua:1119
+#: manager.lua:522 manager.lua:1069 manager.lua:1268
 msgid "Please set API Key in settings."
 msgstr "Укажите API-ключ в настройках."
 
-#: manager.lua:447
+#: manager.lua:540
 msgid "Book not found in Folio library."
 msgstr "Книга не найдена в библиотеке Folio."
 
-#: manager.lua:454
+#: manager.lua:547
 msgid "Syncing annotations with Folio..."
 msgstr "Синхронизация аннотаций с Folio…"
 
-#: manager.lua:460
+#: manager.lua:553
 msgid "Failed to fetch remote annotations."
 msgstr "Не удалось получить аннотации с сервера."
 
-#: manager.lua:690
+#: manager.lua:783
 msgid "Annotations synchronized with Folio!"
 msgstr "Аннотации синхронизированы с Folio!"
 
-#: manager.lua:701
+#: manager.lua:794
 msgid "Syncing annotations & bookmarks with Folio..."
 msgstr "Синхронизация аннотаций и закладок с Folio…"
 
-#: manager.lua:708
+#: manager.lua:801
 msgid "Annotations & bookmarks synchronized with Folio!"
 msgstr "Аннотации и закладки синхронизированы с Folio!"
 
-#: manager.lua:710
+#: manager.lua:803
 msgid "Failed to synchronize annotations or bookmarks."
 msgstr "Не удалось синхронизировать аннотации или закладки."
 
-#: manager.lua:998
+#: manager.lua:1091
 msgid "Pushing all document data to Folio..."
 msgstr "Отправка всех данных документа в Folio…"
 
-#: manager.lua:1010
+#: manager.lua:1104
 msgid "All document data sent to Folio (%1%)!"
 msgstr "Все данные документа отправлены в Folio (%1%)!"
 
-#: manager.lua:1012
+#: manager.lua:1106
 msgid "Failed to push progress to Folio."
 msgstr "Не удалось отправить прогресс в Folio."
 
-#: manager.lua:1141
+#: manager.lua:1290
 msgid "Fetching document data from Folio..."
 msgstr "Получение данных документа из Folio…"
 
-#: manager.lua:1159
+#: manager.lua:1314
+msgid "Marked as Read"
+msgstr "Прочитано"
+
+#: manager.lua:1316
 msgid "Progress: %1%"
 msgstr "Прогресс: %1%"
 
-#: manager.lua:1166
+#: manager.lua:1323
 msgid "Fetched remote data: %1"
 msgstr "Получены данные: %1"
 
-#: manager.lua:1167
+#: manager.lua:1324
 msgid "Up to date"
 msgstr "Актуально"
 
@@ -369,139 +402,291 @@ msgstr "📥 Получить все данные активного докум�
 msgid "🔄 Sync Active Document Annotations"
 msgstr "🔄 Синхронизировать аннотации активного документа"
 
-#: menus.lua:54
-msgid "⚙️ Settings & Account"
-msgstr "⚙️ Настройки и аккаунт"
-
-#: menus.lua:68
-msgid "Not set"
-msgstr "Не задано"
-
-#: menus.lua:69
-msgid "Server URL: %1"
-msgstr "URL сервера: %1"
-
-#: menus.lua:80
-msgid "API Key: %1"
-msgstr "API-ключ: %1"
-
-#: menus.lua:82
-msgid "API Key: Not Set (Tap to Enter API Key)"
-msgstr "API-ключ: Не задан (нажмите, чтобы ввести)"
-
-#: menus.lua:92
-msgid "Download Folder: %1"
-msgstr "Папка загрузки: %1"
-
-#: menus.lua:107
-msgid "Automatically Create Series Folders"
-msgstr "Автоматически создавать папки серий"
-
-#: menus.lua:117
-msgid "Auto-sync Reading Progress"
-msgstr "Автосинхронизация прогресса чтения"
-
-#: menus.lua:111
-msgid "Version: %1"
-msgstr "Версия: %1"
-
-#: menus.lua:121
-msgid "Folio Server URL"
-msgstr "URL сервера Folio"
-
-#: menus.lua:123
-msgid "Enter the base URL of your self-hosted Folio backend."
-msgstr "Введите базовый URL вашего сервера Folio."
-
-#: menus.lua:134 menus.lua:166 menus.lua:200
-msgid "Save"
-msgstr "Сохранить"
-
-#: menus.lua:141
-msgid "Server URL saved!"
-msgstr "URL сервера сохранён!"
-
-#: menus.lua:153
-msgid "Download Folder Path"
-msgstr "Путь к папке загрузки"
-
-#: menus.lua:155
-msgid "Location on device where downloaded books will be stored."
-msgstr "Место на устройстве для хранения загруженных книг."
-
-#: menus.lua:173
-msgid "Download folder path updated."
-msgstr "Путь к папке загрузки обновлён."
-
-#: menus.lua:187
-msgid "Folio API Key"
-msgstr "API-ключ Folio"
-
-#: menus.lua:189
-msgid "Enter API key generated from your Folio profile."
-msgstr "Введите API-ключ, сгенерированный в вашем профиле Folio."
-
-#: menus.lua:210
-msgid "API Key saved!"
-msgstr "API-ключ сохранён!"
-
-#: browser.lua:411
-msgid "✗ Mark as Unread on Folio"
-msgstr "✗ Пометить как непрочитанную на Folio"
-
-#: browser.lua:418
-msgid "✓ Mark as Read on Folio"
-msgstr "✓ Пометить как прочитанную на Folio"
-
-#: browser.lua:426
-msgid "Actions for '%1'"
-msgstr "Действия для «%1»"
-
-#: browser.lua:439
-msgid "book"
-msgstr "книги"
-
-#: browser.lua:447
-msgid "Marked '%1' as read on Folio."
-msgstr "Книга «%1» отмечена как прочитанная на Folio."
-
-#: browser.lua:448
-msgid "Marked '%1' as unread on Folio."
-msgstr "С книги «%1» снята отметка о прочтении на Folio."
-
-#: browser.lua:462
-msgid "Failed to update read status on Folio."
-msgstr "Не удалось обновить статус прочтения на Folio."
-
-#: main.lua:141
-msgid "FolioSync: Toggle read / finished status"
-msgstr "FolioSync: Переключить статус прочтения"
-
-#: manager.lua:1259
-msgid "Marked as Read"
-msgstr "Прочитано"
-
 #: menus.lua:55
 msgid "✓ Toggle Read Status on Folio"
 msgstr "✓ Переключить статус прочтения на Folio"
 
-#: menus.lua:242
+#: menus.lua:62
+msgid "⚙️ Settings & Account"
+msgstr "⚙️ Настройки и аккаунт"
+
+#: menus.lua:79
+msgid "Not set"
+msgstr "Не задано"
+
+#: menus.lua:80
+msgid "Server URL: %1"
+msgstr "URL сервера: %1"
+
+#: menus.lua:91
+msgid "API Key: %1"
+msgstr "API-ключ: %1"
+
+#: menus.lua:93
+msgid "API Key: Not Set (Tap to Enter API Key)"
+msgstr "API-ключ: Не задан (нажмите, чтобы ввести)"
+
+#: menus.lua:103
+msgid "Download Folder: %1"
+msgstr "Папка загрузки: %1"
+
+#: menus.lua:110
+msgid "Automatically Create Series Folders"
+msgstr "Автоматически создавать папки серий"
+
+#: menus.lua:120
+msgid "Auto-sync Reading Progress"
+msgstr "Автосинхронизация прогресса чтения"
+
+#: menus.lua:130
+msgid "Auto-check for Updates"
+msgstr "Автопроверка обновлений"
+
+#: menus.lua:141
+msgid "Check for Updates"
+msgstr "Проверить обновления"
+
+#: menus.lua:148
+msgid "Version: %1 (Tap to check updates)"
+msgstr "Версия: %1 (нажмите для проверки)"
+
+#: menus.lua:160
+msgid "Folio Server URL"
+msgstr "URL сервера Folio"
+
+#: menus.lua:162
+msgid "Enter the base URL of your self-hosted Folio backend."
+msgstr "Введите базовый URL вашего сервера Folio."
+
+#: menus.lua:173 menus.lua:205 menus.lua:239
+msgid "Save"
+msgstr "Сохранить"
+
+#: menus.lua:180
+msgid "Server URL saved!"
+msgstr "URL сервера сохранён!"
+
+#: menus.lua:192
+msgid "Download Folder Path"
+msgstr "Путь к папке загрузки"
+
+#: menus.lua:194
+msgid "Location on device where downloaded books will be stored."
+msgstr "Место на устройстве для хранения загруженных книг."
+
+#: menus.lua:212
+msgid "Download folder path updated."
+msgstr "Путь к папке загрузки обновлён."
+
+#: menus.lua:226
+msgid "Folio API Key"
+msgstr "API-ключ Folio"
+
+#: menus.lua:228
+msgid "Enter API key generated from your Folio profile."
+msgstr "Введите API-ключ, сгенерированный в вашем профиле Folio."
+
+#: menus.lua:249
+msgid "API Key saved!"
+msgstr "API-ключ сохранён!"
+
+#: menus.lua:273
 msgid "Marked as read locally."
 msgstr "Помечено как прочитанное локально."
 
-#: menus.lua:242
+#: menus.lua:273
 msgid "Marked as unread locally."
 msgstr "Помечено как непрочитанное локально."
 
-#: menus.lua:250
+#: menus.lua:281
 msgid "Marked as read on Folio and device."
 msgstr "Помечено как прочитанное на Folio и устройстве."
 
-#: menus.lua:251
+#: menus.lua:282
 msgid "Marked as unread on Folio and device."
 msgstr "Помечено как непрочитанное на Folio и устройстве."
 
-#: menus.lua:254
+#: menus.lua:285
 msgid "Updated locally, but failed to sync to Folio."
 msgstr "Обновлено локально, но не удалось синхронизировать с Folio."
+
+#: update_checker.lua:187
+msgid "Copy"
+msgstr "Копировать"
+
+#: update_checker.lua:192
+msgid "Link copied to clipboard"
+msgstr "Ссылка скопирована в буфер обмена"
+
+#: update_checker.lua:197
+msgid "Show QR code"
+msgstr "Показать QR-код"
+
+#: update_checker.lua:213
+msgid "Open in browser"
+msgstr "Открыть в браузере"
+
+#: update_checker.lua:233
+msgid ""
+"External link:\n"
+"\n"
+"%1"
+msgstr ""
+"Внешняя ссылка:\n"
+"\n"
+"%1"
+
+#: update_checker.lua:253
+msgid "Release Notes"
+msgstr "Информация о релизе"
+
+#: update_checker.lua:271
+msgid "No content."
+msgstr "Нет содержимого."
+
+#: update_checker.lua:486
+msgid "New pre-release version available!"
+msgstr "Доступна новая предварительная версия!"
+
+#: update_checker.lua:486
+msgid "New version available!"
+msgstr "Доступна новая версия!"
+
+#: update_checker.lua:487
+msgid "Current"
+msgstr "Текущая"
+
+#: update_checker.lua:489
+msgid "Latest"
+msgstr "Последняя"
+
+#: update_checker.lua:491 update_checker.lua:1255
+msgid "No release notes available."
+msgstr "Описание релиза отсутствует."
+
+#: update_checker.lua:499
+msgid "Later"
+msgstr "Позже"
+
+#: update_checker.lua:505
+msgid "Visit Release Page"
+msgstr "Перейти на страницу релиза"
+
+#: update_checker.lua:512
+msgid "Please visit:"
+msgstr "Пожалуйста, посетите:"
+
+#: update_checker.lua:525
+msgid "Update Now"
+msgstr "Обновить сейчас"
+
+#: update_checker.lua:535
+msgid "FolioSync Pre-release Update"
+msgstr "Предварительное обновление FolioSync"
+
+#: update_checker.lua:535
+msgid "FolioSync Update Available"
+msgstr "Доступно обновление FolioSync"
+
+#: update_checker.lua:793
+msgid "Download timed out"
+msgstr "Время ожидания загрузки истекло"
+
+#: update_checker.lua:845
+msgid "Failed to start download"
+msgstr "Не удалось начать загрузку"
+
+#: update_checker.lua:873
+msgid "Downloaded file is empty"
+msgstr "Загруженный файл пуст"
+
+#: update_checker.lua:1000
+msgid ""
+"Auto-update is disabled for git-based installs. Please use git pull instead."
+msgstr "Автообновление отключено для git-установок. Используйте git pull."
+
+#: update_checker.lua:1008
+msgid "No download URL available for this release. Please update manually."
+msgstr "Ссылка для скачивания недоступна для этого релиза. Пожалуйста, обновите вручную."
+
+#: update_checker.lua:1016
+msgid "No network connection. Please connect and try again."
+msgstr "Нет подключения к сети. Подключитесь и повторите попытку."
+
+#: update_checker.lua:1038
+msgid "Update failed: %1"
+msgstr "Ошибка обновления: %1"
+
+#: update_checker.lua:1044
+msgid "Downloading FolioSync update %1..."
+msgstr "Загрузка обновления FolioSync %1…"
+
+#: update_checker.lua:1053
+msgid "Download failed"
+msgstr "Ошибка загрузки"
+
+#: update_checker.lua:1058
+msgid "Installing FolioSync update %1..."
+msgstr "Установка обновления FolioSync %1…"
+
+#: update_checker.lua:1072
+msgid "Failed to extract update archive"
+msgstr "Не удалось распаковать архив обновления"
+
+#: update_checker.lua:1087
+msgid "Failed to move current plugin to backup"
+msgstr "Не удалось переместить текущий плагин в резервную копию"
+
+#: update_checker.lua:1097
+msgid ""
+"Failed to install update AND failed to restore previous version. Backup is "
+"at: "
+msgstr ""
+"Не удалось установить обновление И не удалось восстановить предыдущую версию. Резервная копия: "
+
+#: update_checker.lua:1099
+msgid "Failed to install new plugin version. Previous version restored."
+msgstr "Не удалось установить новую версию плагина. Предыдущая версия восстановлена."
+
+#: update_checker.lua:1110
+msgid ""
+"FolioSync updated to version %1.\n"
+"\n"
+"Please restart KOReader to use the new version."
+msgstr ""
+"FolioSync обновлён до версии %1.\n"
+"\n"
+"Пожалуйста, перезапустите KOReader для применения изменений."
+
+#: update_checker.lua:1142
+msgid "Checking for FolioSync updates..."
+msgstr "Проверка обновлений FolioSync…"
+
+#: update_checker.lua:1162
+msgid "Failed to check for updates (timed out). Please try again."
+msgstr "Не удалось проверить обновления (таймаут). Попробуйте снова."
+
+#: update_checker.lua:1163
+msgid "Failed to check for updates. Please check your internet connection."
+msgstr "Не удалось проверить обновления. Проверьте подключение к интернету."
+
+#: update_checker.lua:1177
+msgid "Failed to check for updates: Empty response from server"
+msgstr "Ошибка проверки обновлений: пустой ответ от сервера"
+
+#: update_checker.lua:1189
+msgid "Failed to check for updates: Invalid response format"
+msgstr "Ошибка проверки обновлений: некорректный формат ответа"
+
+#: update_checker.lua:1228
+msgid "No releases found"
+msgstr "Релизы не найдены"
+
+#: update_checker.lua:1265
+msgid "You are running the latest version of FolioSync (%1)"
+msgstr "У вас установлена последняя версия FolioSync (%1)"
+
+#: update_checker.lua:1272
+msgid "You are running a development version of FolioSync (%1)"
+msgstr "Вы используете версию FolioSync для разработчиков (%1)"
 

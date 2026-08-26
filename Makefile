@@ -34,8 +34,9 @@ release: mo
 	cp *.lua $(BUILD_DIR)/$(PLUGIN_NAME)/
 	cp -r l10n $(BUILD_DIR)/$(PLUGIN_NAME)/
 	echo 'return "$(VERSION)"' > $(BUILD_DIR)/$(PLUGIN_NAME)/_version.lua
-	find $(BUILD_DIR)/$(PLUGIN_NAME)/l10n -name '*.po' -delete
-	find $(BUILD_DIR)/$(PLUGIN_NAME)/l10n -name '*.pot' -delete
+	find $(BUILD_DIR)/$(PLUGIN_NAME)/l10n -name '*.po*' -delete
+	find $(BUILD_DIR)/$(PLUGIN_NAME)/l10n -name '*.pot*' -delete
+	find $(BUILD_DIR)/$(PLUGIN_NAME) -name '*~' -delete
 	cd $(BUILD_DIR) && zip -r $(PLUGIN_NAME).zip $(PLUGIN_NAME)
 	@echo "Archive: $(BUILD_DIR)/$(PLUGIN_NAME).zip"
 
