@@ -105,14 +105,21 @@ describe("FolioSync Annotation Conversion", function()
     end)
 
     it("manages sync state persistence", function()
+        local temp_dir = os.getenv("TEMP") or os.getenv("TMP") or "/tmp"
+        temp_dir = temp_dir:gsub("\\", "/")
         package.loaded["datastorage"] = {
-            getSettingsDir = function() return "/tmp" end
+            getSettingsDir = function() return temp_dir end
         }
         local Manager = require("manager")
         local mgr = setmetatable({}, { __index = Manager })
-        local file_path = "/tmp/test_book_123.epub"
-        local sdr_dir = "/tmp/test_book_123.sdr"
-        os.execute("mkdir -p " .. sdr_dir)
+        local file_path = temp_dir .. "/test_book_123.epub"
+        local sdr_dir = temp_dir .. "/test_book_123.sdr"
+        local ok_lfs, lfs = pcall(require, "lfs")
+        if ok_lfs and lfs and lfs.mkdir then
+            lfs.mkdir(sdr_dir)
+        else
+            os.execute('mkdir "' .. sdr_dir:gsub("/", "\\") .. '" 2>nul || mkdir -p "' .. sdr_dir .. '" 2>/dev/null')
+        end
 
         local initial_state = mgr:load_sync_state(file_path)
         assert.is_false(initial_state.has_synced_annos)
@@ -133,7 +140,11 @@ describe("FolioSync Annotation Conversion", function()
         assert.is_equal("page_5", reloaded.bookmarks["b1"].pos0)
 
         os.remove(sdr_dir .. "/folio_sync_state.json")
-        os.remove(sdr_dir)
+        if ok_lfs and lfs and lfs.rmdir then
+            lfs.rmdir(sdr_dir)
+        else
+            os.remove(sdr_dir)
+        end
     end)
 
     it("sanitizes filenames correctly for downloading books", function()
@@ -547,6 +558,95 @@ describe("FolioSync Series and Subseries Resolution", function()
         browser.paths = {}
         local longest_path = browser:resolve_series_path({ id = "b_multi", title = "Crossover Book" })
         assert.is_equal("Author Collection/Trilogy A", longest_path)
+    end)
+end)
+
+
+describe("FolioSync Suspend & Resume Event Handling", function()
+    it("calls sync_progress and sync_annotations_and_bookmarks onSuspend when auto_progress_sync is enabled", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local progress_synced = false
+        local annotations_synced = false
+        local fake_ui = { document = { file = "/books/test.epub" } }
+
+        local fake_manager = {
+            sync_progress = function(self, ui, doc, silent)
+                progress_synced = true
+            end,
+            sync_annotations_and_bookmarks = function(self, ui, doc, force_manual)
+                annotations_synced = true
+            end,
+        }
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        instance:onSuspend()
+
+        assert.is_true(progress_synced)
+        assert.is_true(annotations_synced)
+    end)
+
+    it("does not sync onSuspend when auto_progress_sync is disabled", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local progress_synced = false
+        local annotations_synced = false
+        local fake_ui = { document = { file = "/books/test.epub" } }
+
+        local fake_manager = {
+            sync_progress = function(self, ui, doc, silent) progress_synced = true end,
+            sync_annotations_and_bookmarks = function(self, ui, doc, force_manual) annotations_synced = true end,
+        }
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = false },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        instance:onSuspend()
+
+        assert.is_false(progress_synced)
+        assert.is_false(annotations_synced)
+    end)
+
+    it("calls pull_all_data onResume when auto_progress_sync is enabled", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local data_pulled = false
+        local fake_ui = { document = { file = "/books/test.epub" } }
+
+        local fake_manager = {
+            pull_all_data = function(self, ui, doc, force_manual)
+                data_pulled = true
+            end,
+        }
+
+        local UIManager = package.loaded["ui/uimanager"]
+        UIManager.scheduleIn = function(self, delay, cb)
+            cb()
+        end
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        instance:onResume()
+
+        assert.is_true(data_pulled)
     end)
 end)
 
