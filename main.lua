@@ -141,6 +141,7 @@ function FolioSync:onPageUpdate(page_number)
         if not self._last_progress_sync_time or (now - self._last_progress_sync_time) >= 5 then
             self._last_progress_sync_time = now
             self.manager:sync_progress(ui, ui.document, true)
+            self.manager:sync_annotations_and_bookmarks(ui, ui.document, false)
         end
     end
 end
@@ -157,7 +158,6 @@ function FolioSync:onSuspend()
     local ui = self:get_ui()
     if self.settings.auto_progress_sync and ui and ui.document then
         self.manager:sync_progress(ui, ui.document, true)
-        self.manager:sync_annotations_and_bookmarks(ui, ui.document, false)
     end
 end
 
@@ -169,11 +169,11 @@ function FolioSync:onResume()
             UIManager:scheduleIn(1, function()
                 local current_ui = self:get_ui()
                 if self.settings.auto_progress_sync and current_ui and current_ui.document then
-                    self.manager:pull_all_data(current_ui, nil, false)
+                    self.manager:pull_progress(current_ui, nil, false)
                 end
             end)
         else
-            self.manager:pull_all_data(ui, nil, false)
+            self.manager:pull_progress(ui, nil, false)
         end
     end
 end

@@ -547,7 +547,14 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
             utils.show_msg(_("Syncing annotations with Folio..."))
         end
 
-        self.api:list_annotations(book_id, function(success, remote_annos)
+        local state = self:load_sync_state(info.file or info.file_path)
+        local since = nil
+        if state.has_synced_annos and state.last_annos_sync_at and not force_manual then
+            since = state.last_annos_sync_at
+        end
+        local sync_start_time = os.date("!%Y-%m-%dT%H:%M:%SZ")
+
+        self.api:list_annotations(book_id, since, function(success, remote_annos)
             if not success or not remote_annos then
                 if force_manual then
                     utils.show_msg(_("Failed to fetch remote annotations."))
@@ -565,7 +572,6 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
             end
 
-            local state = self:load_sync_state(info.file or info.file_path)
             local modified_raw = false
             local state_annos = state.annotations or {}
 
@@ -648,31 +654,33 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                     end
                 end
 
-                -- 2. Remote Deletions
-                snap_keys = {}
-                for key, _ in pairs(state_annos) do
-                    table.insert(snap_keys, key)
-                end
-
-                for _, key in ipairs(snap_keys) do
-                    local snap_item = state_annos[key]
-                    local found_remote = false
-                    for _, r_item in ipairs(remote_annos) do
-                        if annotations_helper.is_same_annotation(snap_item, r_item) then
-                            found_remote = true
-                            break
-                        end
+                -- 2. Remote Deletions (only on full sync, i.e. when since is nil)
+                if not since then
+                    snap_keys = {}
+                    for key, _ in pairs(state_annos) do
+                        table.insert(snap_keys, key)
                     end
-                    if not found_remote then
-                        for idx = #raw_items, 1, -1 do
-                            local l_item = raw_items[idx]
-                            if annotations_helper.is_annotation(l_item) and annotations_helper.is_same_annotation(l_item, snap_item) then
-                                table.remove(raw_items, idx)
-                                modified_raw = true
+
+                    for _, key in ipairs(snap_keys) do
+                        local snap_item = state_annos[key]
+                        local found_remote = false
+                        for _, r_item in ipairs(remote_annos) do
+                            if annotations_helper.is_same_annotation(snap_item, r_item) then
+                                found_remote = true
                                 break
                             end
                         end
-                        state_annos[key] = nil
+                        if not found_remote then
+                            for idx = #raw_items, 1, -1 do
+                                local l_item = raw_items[idx]
+                                if annotations_helper.is_annotation(l_item) and annotations_helper.is_same_annotation(l_item, snap_item) then
+                                    table.remove(raw_items, idx)
+                                    modified_raw = true
+                                    break
+                                end
+                            end
+                            state_annos[key] = nil
+                        end
                     end
                 end
 
@@ -760,6 +768,8 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                     }
                 end
             end
+            state.has_synced_annos = true
+            state.last_annos_sync_at = sync_start_time
             state.annotations = new_state_annos
             self:save_sync_state(state, info.file or info.file_path)
 
@@ -828,7 +838,14 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
             return
         end
 
-        self.api:list_bookmarks(book_id, function(success, remote_bms)
+        local state = self:load_sync_state(info.file or info.file_path)
+        local since = nil
+        if state.has_synced_bms and state.last_bms_sync_at and not force_manual then
+            since = state.last_bms_sync_at
+        end
+        local sync_start_time = os.date("!%Y-%m-%dT%H:%M:%SZ")
+
+        self.api:list_bookmarks(book_id, since, function(success, remote_bms)
             if not success or not remote_bms then
                 if callback then callback(false) end
                 return
@@ -843,7 +860,6 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                 annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
             end
 
-            local state = self:load_sync_state(info.file or info.file_path)
             local modified_raw = false
             local state_bms = state.bookmarks or {}
 
@@ -926,31 +942,33 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                     end
                 end
 
-                -- 2. Remote Deletions
-                snap_keys = {}
-                for key, _ in pairs(state_bms) do
-                    table.insert(snap_keys, key)
-                end
-
-                for _, key in ipairs(snap_keys) do
-                    local snap_bm = state_bms[key]
-                    local found_remote = false
-                    for _, r_bm in ipairs(remote_bms) do
-                        if annotations_helper.is_same_bookmark(snap_bm, r_bm) then
-                            found_remote = true
-                            break
-                        end
+                -- 2. Remote Deletions (only on full sync, i.e. when since is nil)
+                if not since then
+                    snap_keys = {}
+                    for key, _ in pairs(state_bms) do
+                        table.insert(snap_keys, key)
                     end
-                    if not found_remote then
-                        for idx = #raw_items, 1, -1 do
-                            local l_item = raw_items[idx]
-                            if annotations_helper.is_bookmark(l_item) and annotations_helper.is_same_bookmark(l_item, snap_bm) then
-                                table.remove(raw_items, idx)
-                                modified_raw = true
+
+                    for _, key in ipairs(snap_keys) do
+                        local snap_bm = state_bms[key]
+                        local found_remote = false
+                        for _, r_bm in ipairs(remote_bms) do
+                            if annotations_helper.is_same_bookmark(snap_bm, r_bm) then
+                                found_remote = true
                                 break
                             end
                         end
-                        state_bms[key] = nil
+                        if not found_remote then
+                            for idx = #raw_items, 1, -1 do
+                                local l_item = raw_items[idx]
+                                if annotations_helper.is_bookmark(l_item) and annotations_helper.is_same_bookmark(l_item, snap_bm) then
+                                    table.remove(raw_items, idx)
+                                    modified_raw = true
+                                    break
+                                end
+                            end
+                            state_bms[key] = nil
+                        end
                     end
                 end
 
@@ -1036,6 +1054,8 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                     }
                 end
             end
+            state.has_synced_bms = true
+            state.last_bms_sync_at = sync_start_time
             state.bookmarks = new_state_bms
             self:save_sync_state(state, info.file or info.file_path)
 
@@ -1260,13 +1280,14 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
     return false
 end
 
--- Fetch/pull all data (progress + annotations + bookmarks) for current document from Folio
-function Manager:pull_all_data(ui, document, force_manual)
-    if force_manual == nil then force_manual = true end
+-- Fetch/pull reading progress only for current document from Folio
+function Manager:pull_progress(ui, document, force_manual, callback)
+    if force_manual == nil then force_manual = false end
     if not self.api:has_auth() then
         if force_manual then
             utils.show_msg(_("Please set API Key in settings."))
         end
+        if callback then callback(false) end
         return
     end
 
@@ -1275,6 +1296,7 @@ function Manager:pull_all_data(ui, document, force_manual)
         if force_manual then
             utils.show_msg(_("No active document open."))
         end
+        if callback then callback(false) end
         return
     end
 
@@ -1283,11 +1305,12 @@ function Manager:pull_all_data(ui, document, force_manual)
             if force_manual then
                 utils.show_msg(_("Document not matched on Folio server."))
             end
+            if callback then callback(false) end
             return
         end
 
         if force_manual then
-            utils.show_msg(_("Fetching document data from Folio..."))
+            utils.show_msg(_("Fetching reading progress from Folio..."))
         end
 
         self.api:get_progress(book_id, function(prog_ok, remote_data)
@@ -1317,13 +1340,50 @@ function Manager:pull_all_data(ui, document, force_manual)
                 end
             end
 
-            -- 2-Way Sync Annotations & Bookmarks
-            self:sync_annotations_and_bookmarks(ui, document, false, function()
-                if force_manual then
-                    utils.show_msg(T(_("Fetched remote data: %1"),
-                        progress_msg ~= "" and progress_msg or _("Up to date")))
+            if force_manual then
+                utils.show_msg(T(_("Fetched progress: %1"),
+                    progress_msg ~= "" and progress_msg or _("Up to date")))
+            end
+
+            if callback then callback(prog_ok) end
+        end)
+    end)
+end
+
+-- Fetch/pull all data (progress + annotations + bookmarks) for current document from Folio
+function Manager:pull_all_data(ui, document, force_manual, callback)
+    if force_manual == nil then force_manual = true end
+    if not self.api:has_auth() then
+        if force_manual then
+            utils.show_msg(_("Please set API Key in settings."))
+        end
+        if callback then callback(false) end
+        return
+    end
+
+    local info = self:get_doc_info(ui, document)
+    if not info then
+        if force_manual then
+            utils.show_msg(_("No active document open."))
+        end
+        if callback then callback(false) end
+        return
+    end
+
+    if force_manual then
+        utils.show_msg(_("Fetching document data from Folio..."))
+    end
+
+    self:pull_progress(ui, document, false, function(prog_ok)
+        self:sync_annotations_and_bookmarks(ui, document, false, function(annos_ok)
+            if force_manual then
+                if prog_ok or annos_ok then
+                    utils.show_msg(_("All document data fetched from Folio!"))
+                else
+                    utils.show_msg(_("Failed to fetch document data from Folio."))
                 end
-            end)
+            end
+            if callback then callback(prog_ok and annos_ok) end
         end)
     end)
 end

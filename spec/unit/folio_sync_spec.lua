@@ -346,8 +346,14 @@ describe("FolioSync Manager Read Status Handling", function()
             get_progress = function(self, book_id, cb)
                 cb(true, { progressPercent = 80, isRead = true, location = "/6/10" })
             end,
-            list_annotations = function(self, book_id, cb) cb(true, {}) end,
-            list_bookmarks = function(self, book_id, cb) cb(true, {}) end,
+            list_annotations = function(self, book_id, since_or_cb, maybe_cb)
+                local cb = type(since_or_cb) == "function" and since_or_cb or maybe_cb
+                if cb then cb(true, {}) end
+            end,
+            list_bookmarks = function(self, book_id, since_or_cb, maybe_cb)
+                local cb = type(since_or_cb) == "function" and since_or_cb or maybe_cb
+                if cb then cb(true, {}) end
+            end,
         }
 
         local local_status = "reading"
@@ -563,7 +569,7 @@ end)
 
 
 describe("FolioSync Suspend & Resume Event Handling", function()
-    it("calls sync_progress and sync_annotations_and_bookmarks onSuspend when auto_progress_sync is enabled", function()
+    it("calls sync_progress ONLY onSuspend when auto_progress_sync is enabled", function()
         package.loaded["main"] = nil
         local FolioSync = require("main")
 
@@ -590,7 +596,7 @@ describe("FolioSync Suspend & Resume Event Handling", function()
         instance:onSuspend()
 
         assert.is_true(progress_synced)
-        assert.is_true(annotations_synced)
+        assert.is_false(annotations_synced)
     end)
 
     it("does not sync onSuspend when auto_progress_sync is disabled", function()
@@ -619,16 +625,20 @@ describe("FolioSync Suspend & Resume Event Handling", function()
         assert.is_false(annotations_synced)
     end)
 
-    it("calls pull_all_data onResume when auto_progress_sync is enabled", function()
+    it("calls pull_progress ONLY onResume when auto_progress_sync is enabled", function()
         package.loaded["main"] = nil
         local FolioSync = require("main")
 
-        local data_pulled = false
+        local progress_pulled = false
+        local all_pulled = false
         local fake_ui = { document = { file = "/books/test.epub" } }
 
         local fake_manager = {
+            pull_progress = function(self, ui, doc, force_manual)
+                progress_pulled = true
+            end,
             pull_all_data = function(self, ui, doc, force_manual)
-                data_pulled = true
+                all_pulled = true
             end,
         }
 
@@ -646,7 +656,78 @@ describe("FolioSync Suspend & Resume Event Handling", function()
 
         instance:onResume()
 
-        assert.is_true(data_pulled)
+        assert.is_true(progress_pulled)
+        assert.is_false(all_pulled)
+    end)
+
+    it("syncs progress and annotations together in onPageUpdate every 5s", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local progress_count = 0
+        local annotations_count = 0
+        local fake_ui = { document = { file = "/books/test.epub" } }
+
+        local fake_manager = {
+            sync_progress = function(self, ui, doc, silent)
+                progress_count = progress_count + 1
+            end,
+            sync_annotations_and_bookmarks = function(self, ui, doc, force_manual)
+                annotations_count = annotations_count + 1
+            end,
+        }
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        -- 1. First page update: syncs both progress and annotations
+        instance:onPageUpdate(1)
+        assert.is_equal(1, progress_count)
+        assert.is_equal(1, annotations_count)
+
+        -- 2. Page update <5s later: throttled
+        instance:onPageUpdate(2)
+        assert.is_equal(1, progress_count)
+        assert.is_equal(1, annotations_count)
+
+        -- 3. Page update >=5s later: both sync
+        instance._last_progress_sync_time = os.time() - 6
+        instance:onPageUpdate(3)
+        assert.is_equal(2, progress_count)
+        assert.is_equal(2, annotations_count)
+    end)
+
+    it("appends since parameter to list_annotations and list_bookmarks when since is provided", function()
+        local requested_urls = {}
+        package.loaded["socket.http"] = {
+            request = function(req)
+                table.insert(requested_urls, req.url)
+                return "[]", 200, {}
+            end
+        }
+        package.loaded["folio_api"] = nil
+        local FolioAPI = require("folio_api")
+        local api = FolioAPI:new({ server_url = "http://localhost:8080", api_key = "key123" })
+
+        -- Call without since
+        api:list_annotations("book1", function(ok, data) end)
+        assert.is_equal("http://localhost:8080/books/book1/annotations?format=xpointer", requested_urls[1])
+
+        -- Call with since
+        api:list_annotations("book1", "2026-08-28T02:00:00Z", function(ok, data) end)
+        assert.is_equal("http://localhost:8080/books/book1/annotations?format=xpointer&since=2026-08-28T02%3A00%3A00Z", requested_urls[2])
+
+        -- Call bookmarks without since
+        api:list_bookmarks("book1", function(ok, data) end)
+        assert.is_equal("http://localhost:8080/books/book1/bookmarks?format=xpointer", requested_urls[3])
+
+        -- Call bookmarks with since
+        api:list_bookmarks("book1", "2026-08-28T02:00:00Z", function(ok, data) end)
+        assert.is_equal("http://localhost:8080/books/book1/bookmarks?format=xpointer&since=2026-08-28T02%3A00%3A00Z", requested_urls[4])
     end)
 end)
 

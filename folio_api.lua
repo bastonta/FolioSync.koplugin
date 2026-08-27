@@ -453,9 +453,21 @@ function FolioAPI:set_read_status(book_id, is_read, callback)
     return self:update_progress(book_id, nil, nil, is_read, callback)
 end
 
-function FolioAPI:list_annotations(book_id, callback)
+function FolioAPI:list_annotations(book_id, since_or_cb, maybe_callback)
+    local since = nil
+    local callback = nil
+    if type(since_or_cb) == "function" then
+        callback = since_or_cb
+    else
+        since = since_or_cb
+        callback = maybe_callback
+    end
+
     local base_url = self:get_server_url()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations?format=xpointer"
+    if since and since ~= "" then
+        url = url .. "&since=" .. utils.url_encode(since)
+    end
 
     local http = get_http_client()
     if not http then
@@ -584,9 +596,21 @@ function FolioAPI:delete_annotation(book_id, annotation_id, callback)
     return false
 end
 
-function FolioAPI:list_bookmarks(book_id, callback)
+function FolioAPI:list_bookmarks(book_id, since_or_cb, maybe_callback)
+    local since = nil
+    local callback = nil
+    if type(since_or_cb) == "function" then
+        callback = since_or_cb
+    else
+        since = since_or_cb
+        callback = maybe_callback
+    end
+
     local base_url = self:get_server_url()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks?format=xpointer"
+    if since and since ~= "" then
+        url = url .. "&since=" .. utils.url_encode(since)
+    end
 
     local http = get_http_client()
     if not http then

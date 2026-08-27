@@ -130,5 +130,15 @@ function M.ensure_dir(dir_path)
     end
 end
 
+function M.url_encode(str)
+    if not str then return "" end
+    str = tostring(str)
+    str = str:gsub("\n", "\r\n")
+    str = str:gsub("([^%w%-_%.%~])", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end)
+    return str
+end
+
 return M
 
