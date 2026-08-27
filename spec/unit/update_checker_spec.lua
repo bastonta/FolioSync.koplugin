@@ -170,6 +170,13 @@ describe("FolioSync UpdateChecker", function()
             assert.is_equal(-1, UpdateChecker._compareVersions("1.0.0", "dev"))
             assert.is_equal(0, UpdateChecker._compareVersions("dev", "dev"))
         end)
+
+        it("correctly identifies release versions higher than remote as not dev", function()
+            local v = UpdateChecker._parseVersion("0.3.0")
+            assert.is_not_nil(v)
+            assert.is_nil(v.is_dev)
+            assert.is_equal(1, UpdateChecker._compareVersions("0.3.0", "0.2.2"))
+        end)
     end)
 
     describe("Backup Path Resolution", function()

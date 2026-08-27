@@ -6,7 +6,7 @@ local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
 
 -- Constants
-local GITHUB_API_URL = "https://api.github.com/repos/bastonta/FolioApp/releases"
+local GITHUB_API_URL = "https://api.github.com/repos/bastonta/FolioSync.koplugin/releases"
 local USER_AGENT = "KOReader-FolioSync-Plugin"
 
 -- Timeout constants in seconds
@@ -1233,6 +1233,9 @@ function UpdateChecker.checkForUpdates(auto, include_prereleases)
         local comparison = compareVersions(current_version, latest_version)
         logger.info("FolioSync UpdateChecker: current=" .. tostring(current_version) .. ", latest=" .. tostring(latest_version) .. ", comparison=" .. tostring(comparison))
 
+        local current_parsed = parseVersion(current_version)
+        local is_dev = current_parsed and current_parsed.is_dev
+
         if comparison < 0 then
             local zip_url = nil
             if latest_release.assets then
@@ -1254,7 +1257,7 @@ function UpdateChecker.checkForUpdates(auto, include_prereleases)
             }
 
             showUpdatePopup(update_info)
-        elseif comparison == 0 then
+        elseif comparison == 0 or (comparison > 0 and not is_dev) then
             if not auto then
                 UIManager:show(InfoMessage:new{
                     text = T(_("You are running the latest version of FolioSync (%1)"), current_version),

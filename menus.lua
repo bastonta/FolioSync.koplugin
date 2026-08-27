@@ -69,9 +69,11 @@ function Menus:get_menu_structure()
 end
 
 function Menus:get_settings_sub_menu()
-    local ok_ver, version = pcall(require, "_version")
-    if not ok_ver or type(version) ~= "string" then
-        version = "dev"
+    local ok_uc, UpdateChecker = pcall(require, "update_checker")
+    local version = (ok_uc and UpdateChecker and UpdateChecker.getCurrentVersion and UpdateChecker.getCurrentVersion())
+    if not version or type(version) ~= "string" then
+        local ok_ver, ver = pcall(require, "_version")
+        version = (ok_ver and type(ver) == "string") and ver or "dev"
     end
     return {
         {
