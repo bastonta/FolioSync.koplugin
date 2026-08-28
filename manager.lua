@@ -684,13 +684,13 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                     end
                 end
 
-                -- 3. New local items -> push
+                -- 3. New or modified local items -> push
                 for _, l_item in ipairs(raw_items) do
                     if annotations_helper.is_annotation(l_item) then
-                        local in_state = false
+                        local snap_item = nil
                         for _, snap in pairs(state_annos) do
                             if annotations_helper.is_same_annotation(l_item, snap) then
-                                in_state = true
+                                snap_item = snap
                                 break
                             end
                         end
@@ -702,7 +702,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                                 break
                             end
                         end
-                        if not in_state and not in_remote then
+                        if not snap_item and not in_remote then
                             local folio_annot = annotations_helper.koreader_to_folio_annotation(l_item)
                             if folio_annot then
                                 self.api:create_annotation(book_id, folio_annot, function(c_ok, c_data)
@@ -711,6 +711,14 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                                         modified_raw = true
                                     end
                                 end)
+                            end
+                        elseif snap_item and (l_item.folio_id or snap_item.folio_id) then
+                            local fid = l_item.folio_id or snap_item.folio_id
+                            if (l_item.note or "") ~= (snap_item.note or "") or (l_item.text or "") ~= (snap_item.text or "") or (l_item.color or "yellow") ~= (snap_item.color or "yellow") then
+                                local folio_annot = annotations_helper.koreader_to_folio_annotation(l_item)
+                                if folio_annot and fid then
+                                    self.api:update_annotation(book_id, fid, folio_annot)
+                                end
                             end
                         end
                     end
@@ -765,6 +773,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                         pos1 = l_item.pos1,
                         text = l_item.text,
                         note = l_item.note,
+                        color = l_item.color,
                     }
                 end
             end
@@ -804,8 +813,11 @@ function Manager:sync_annotations_and_bookmarks(ui, document, force_manual, call
         utils.show_msg(_("Syncing annotations & bookmarks with Folio..."))
     end
 
+    self.is_syncing_annotations = true
+
     self:sync_annotations(ui, document, false, function(annos_ok)
         self:sync_bookmarks(ui, document, false, function(bms_ok)
+            self.is_syncing_annotations = false
             if force_manual then
                 if annos_ok and bms_ok then
                     utils.show_msg(_("Annotations & bookmarks synchronized with Folio!"))

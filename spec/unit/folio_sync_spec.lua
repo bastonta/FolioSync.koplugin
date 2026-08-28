@@ -568,7 +568,7 @@ describe("FolioSync Series and Subseries Resolution", function()
 end)
 
 
-describe("FolioSync Suspend & Resume Event Handling", function()
+describe("FolioSync Suspend & Resume & Event Handling", function()
     it("calls sync_progress ONLY onSuspend when auto_progress_sync is enabled", function()
         package.loaded["main"] = nil
         local FolioSync = require("main")
@@ -625,20 +625,20 @@ describe("FolioSync Suspend & Resume Event Handling", function()
         assert.is_false(annotations_synced)
     end)
 
-    it("calls pull_progress ONLY onResume when auto_progress_sync is enabled", function()
+    it("pulls progress first, then syncs annotations once onResume when auto_progress_sync is enabled", function()
         package.loaded["main"] = nil
         local FolioSync = require("main")
 
-        local progress_pulled = false
-        local all_pulled = false
+        local call_sequence = {}
         local fake_ui = { document = { file = "/books/test.epub" } }
 
         local fake_manager = {
-            pull_progress = function(self, ui, doc, force_manual)
-                progress_pulled = true
+            pull_progress = function(self, ui, doc, force_manual, callback)
+                table.insert(call_sequence, "pull_progress")
+                if callback then callback(true) end
             end,
-            pull_all_data = function(self, ui, doc, force_manual)
-                all_pulled = true
+            sync_annotations_and_bookmarks = function(self, ui, doc, force_manual)
+                table.insert(call_sequence, "sync_annotations_and_bookmarks")
             end,
         }
 
@@ -656,11 +656,49 @@ describe("FolioSync Suspend & Resume Event Handling", function()
 
         instance:onResume()
 
-        assert.is_true(progress_pulled)
-        assert.is_false(all_pulled)
+        assert.is_equal(2, #call_sequence)
+        assert.is_equal("pull_progress", call_sequence[1])
+        assert.is_equal("sync_annotations_and_bookmarks", call_sequence[2])
     end)
 
-    it("syncs progress and annotations together in onPageUpdate every 5s", function()
+    it("pulls progress first, then syncs annotations once onReaderReady when opening a book with auto_progress_sync enabled", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local call_sequence = {}
+        local fake_ui = { document = { file = "/books/test.epub" } }
+
+        local fake_manager = {
+            pull_progress = function(self, ui, doc, force_manual, callback)
+                table.insert(call_sequence, "pull_progress")
+                if callback then callback(true) end
+            end,
+            sync_annotations_and_bookmarks = function(self, ui, doc, force_manual)
+                table.insert(call_sequence, "sync_annotations_and_bookmarks")
+            end,
+        }
+
+        local UIManager = package.loaded["ui/uimanager"]
+        UIManager.scheduleIn = function(self, delay, cb)
+            cb()
+        end
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+            onDispatcherRegisterActions = function(self) end,
+        }, { __index = FolioSync })
+
+        instance:onReaderReady()
+
+        assert.is_equal(2, #call_sequence)
+        assert.is_equal("pull_progress", call_sequence[1])
+        assert.is_equal("sync_annotations_and_bookmarks", call_sequence[2])
+    end)
+
+    it("syncs ONLY progress in onPageUpdate every 5s (annotations not synced on page turn)", function()
         package.loaded["main"] = nil
         local FolioSync = require("main")
 
@@ -684,21 +722,91 @@ describe("FolioSync Suspend & Resume Event Handling", function()
             get_ui = function(self) return fake_ui end,
         }, { __index = FolioSync })
 
-        -- 1. First page update: syncs both progress and annotations
+        -- 1. First page update: syncs progress only
         instance:onPageUpdate(1)
         assert.is_equal(1, progress_count)
-        assert.is_equal(1, annotations_count)
+        assert.is_equal(0, annotations_count)
 
         -- 2. Page update <5s later: throttled
         instance:onPageUpdate(2)
         assert.is_equal(1, progress_count)
-        assert.is_equal(1, annotations_count)
+        assert.is_equal(0, annotations_count)
 
-        -- 3. Page update >=5s later: both sync
+        -- 3. Page update >=5s later: progress syncs again, annotations remain 0
         instance._last_progress_sync_time = os.time() - 6
         instance:onPageUpdate(3)
         assert.is_equal(2, progress_count)
-        assert.is_equal(2, annotations_count)
+        assert.is_equal(0, annotations_count)
+    end)
+
+    it("syncs ONLY progress in onCloseDocument when auto_progress_sync is enabled", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local progress_synced = false
+        local annotations_synced = false
+        local fake_ui = { document = { file = "/books/test.epub" } }
+
+        local fake_manager = {
+            sync_progress = function(self, ui, doc, silent)
+                progress_synced = true
+            end,
+            sync_annotations_and_bookmarks = function(self, ui, doc, force_manual)
+                annotations_synced = true
+            end,
+        }
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        instance:onCloseDocument()
+
+        assert.is_true(progress_synced)
+        assert.is_false(annotations_synced)
+    end)
+
+    it("immediately syncs annotations on onAnnotationsModified / onBookmarksModified when auto_progress_sync is enabled", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local annotations_sync_count = 0
+        local fake_ui = { document = { file = "/books/test.epub" } }
+
+        local fake_manager = {
+            is_syncing_annotations = false,
+            sync_annotations_and_bookmarks = function(self, ui, doc, force_manual)
+                annotations_sync_count = annotations_sync_count + 1
+            end,
+        }
+
+        local UIManager = package.loaded["ui/uimanager"]
+        UIManager.scheduleIn = function(self, delay, cb)
+            cb()
+        end
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        -- 1. User adds annotation
+        instance:onAnnotationsModified({ { pos0 = "1", pos1 = "2" } })
+        assert.is_equal(1, annotations_sync_count)
+
+        -- 2. User adds bookmark
+        instance:onBookmarksModified({ { pos0 = "10" } })
+        assert.is_equal(2, annotations_sync_count)
+
+        -- 3. While syncing (is_syncing_annotations = true), events are ignored to prevent loops
+        fake_manager.is_syncing_annotations = true
+        instance:onAnnotationsModified({ { pos0 = "1", pos1 = "2" } })
+        assert.is_equal(2, annotations_sync_count)
     end)
 
     it("appends since parameter to list_annotations and list_bookmarks when since is provided", function()

@@ -97,6 +97,39 @@ function FolioSync:onReaderReady()
         self.ui.menu:registerToMainMenu(self)
     end
     self:onDispatcherRegisterActions()
+
+    if self.settings.auto_progress_sync then
+        local UIManager = require("ui/uimanager")
+        if UIManager and UIManager.scheduleIn then
+            UIManager:scheduleIn(1, function()
+                self:pull_and_sync_all()
+            end)
+        else
+            self:pull_and_sync_all()
+        end
+    end
+end
+
+function FolioSync:pull_and_sync_all(target_ui)
+    local ui = target_ui or self:get_ui()
+    if not (self.settings.auto_progress_sync and ui and ui.document) then
+        return
+    end
+
+    local now = os.time()
+    if self._last_pull_and_sync_time and (now - self._last_pull_and_sync_time) < 3 then
+        return
+    end
+    self._last_pull_and_sync_time = now
+
+    self.manager:pull_progress(ui, nil, false, function(prog_ok)
+        if self.settings.auto_progress_sync then
+            local active_ui = self:get_ui()
+            if active_ui and active_ui.document then
+                self.manager:sync_annotations_and_bookmarks(active_ui, active_ui.document, false)
+            end
+        end
+    end)
 end
 
 function FolioSync:get_ui()
@@ -141,7 +174,6 @@ function FolioSync:onPageUpdate(page_number)
         if not self._last_progress_sync_time or (now - self._last_progress_sync_time) >= 5 then
             self._last_progress_sync_time = now
             self.manager:sync_progress(ui, ui.document, true)
-            self.manager:sync_annotations_and_bookmarks(ui, ui.document, false)
         end
     end
 end
@@ -150,7 +182,6 @@ function FolioSync:onCloseDocument()
     local ui = self:get_ui()
     if self.settings.auto_progress_sync and ui and ui.document then
         self.manager:sync_progress(ui, ui.document, true)
-        self.manager:sync_annotations_and_bookmarks(ui, ui.document, false)
     end
 end
 
@@ -162,20 +193,50 @@ function FolioSync:onSuspend()
 end
 
 function FolioSync:onResume()
-    local ui = self:get_ui()
-    if self.settings.auto_progress_sync and ui and ui.document then
+    if self.settings.auto_progress_sync then
         local UIManager = require("ui/uimanager")
         if UIManager and UIManager.scheduleIn then
             UIManager:scheduleIn(1, function()
-                local current_ui = self:get_ui()
-                if self.settings.auto_progress_sync and current_ui and current_ui.document then
-                    self.manager:pull_progress(current_ui, nil, false)
-                end
+                self:pull_and_sync_all()
             end)
         else
-            self.manager:pull_progress(ui, nil, false)
+            self:pull_and_sync_all()
         end
     end
+end
+
+function FolioSync:onAnnotationsModified(items)
+    if self.manager and self.manager.is_syncing_annotations then
+        return
+    end
+    if self.settings.auto_progress_sync then
+        local ui = self:get_ui()
+        if ui and ui.document then
+            local UIManager = require("ui/uimanager")
+            if self._pending_annotation_sync and UIManager and UIManager.unschedule then
+                UIManager:unschedule(self._pending_annotation_sync)
+                self._pending_annotation_sync = nil
+            end
+            local sync_action
+            sync_action = function()
+                self._pending_annotation_sync = nil
+                local current_ui = self:get_ui()
+                if self.settings.auto_progress_sync and current_ui and current_ui.document then
+                    self.manager:sync_annotations_and_bookmarks(current_ui, current_ui.document, false)
+                end
+            end
+            self._pending_annotation_sync = sync_action
+            if UIManager and UIManager.scheduleIn then
+                UIManager:scheduleIn(0.5, sync_action)
+            else
+                sync_action()
+            end
+        end
+    end
+end
+
+function FolioSync:onBookmarksModified(items)
+    return self:onAnnotationsModified(items)
 end
 
 function FolioSync:onDispatcherRegisterActions()
