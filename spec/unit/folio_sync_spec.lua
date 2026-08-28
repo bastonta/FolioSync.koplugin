@@ -222,7 +222,7 @@ describe("FolioSync API Key Authentication and Read Status", function()
         }
 
         package.loaded["folio_api"] = nil
-        local FolioAPI = require("folio_api")
+        FolioAPI = require("folio_api")
         local api = FolioAPI:new({ server_url = "http://localhost:8080", api_key = "key123" })
 
         api:update_progress("book1", "/6/4", 50.5, true)
@@ -326,7 +326,6 @@ describe("FolioSync Manager Read Status Handling", function()
             }
         }
 
-        local Manager = require("manager")
         local mgr = setmetatable({
             api = fake_api,
             ui = fake_ui,
@@ -380,7 +379,6 @@ describe("FolioSync Manager Read Status Handling", function()
             }
         }
 
-        local Manager = require("manager")
         local mgr = setmetatable({
             api = fake_api,
             ui = fake_ui,

@@ -1,7 +1,7 @@
 local M = {}
 
 -- Sanitize KOReader bookmark/highlight item to exact minimal schema
-function M.sanitize_koreader_annotation(kr_item, target_doc)
+function M.sanitize_koreader_annotation(kr_item)
     if not kr_item or type(kr_item) ~= "table" then return nil end
 
     -- 1. Ensure pos0 is valid
@@ -120,7 +120,7 @@ function M.koreader_to_folio_annotation(kr_item)
 end
 
 -- Convert Folio Annotation response item to KOReader bookmark/highlight item
-function M.folio_to_koreader_annotation(folio_item, target_doc)
+function M.folio_to_koreader_annotation(folio_item)
     if not folio_item then return nil end
 
     local text = type(folio_item.selectedText) == "string" and folio_item.selectedText
@@ -161,7 +161,7 @@ function M.folio_to_koreader_annotation(folio_item, target_doc)
         folio_id = folio_item.id,
     }
 
-    return M.sanitize_koreader_annotation(kr_item, target_doc)
+    return M.sanitize_koreader_annotation(kr_item)
 end
 
 -- Convert Folio Bookmark response item to KOReader bookmark item

@@ -1,6 +1,6 @@
 local json = require("json")
 local logger = require("logger")
-local ok_ffi, ffi = pcall(require, "ffi")
+local _, ffi = pcall(require, "ffi")
 local ffiutil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
@@ -48,34 +48,29 @@ local UIManager = require("ui/uimanager")
 local T = require("ffi/util").template
 
 -- UI modules lazy-loaded on demand to speed up startup
-local InfoMessage, ConfirmBox, Device, Screen, BD, ButtonDialog, Notification
-local NetworkMgr, LuaSettings, DataStorage
-local Blitbuffer, ButtonTable, CenterContainer, Font, FrameContainer, Geom
-local InputContainer, MovableContainer, ScrollHtmlWidget, ScrollTextWidget
+local InfoMessage, Device, Screen, BD, ButtonDialog, Notification
+local NetworkMgr
+local Blitbuffer, ButtonTable, CenterContainer, FrameContainer, Geom
+local InputContainer, MovableContainer, ScrollHtmlWidget
 local Size, TitleBar, VerticalGroup, GestureRange, MD
 
 local function loadUI()
     if Device then return end -- already loaded
     InfoMessage = require("ui/widget/infomessage")
-    ConfirmBox = require("ui/widget/confirmbox")
     Device = require("device")
     Screen = Device.screen
     BD = require("ui/bidi")
     ButtonDialog = require("ui/widget/buttondialog")
     Notification = require("ui/widget/notification")
     NetworkMgr = require("ui/network/manager")
-    LuaSettings = require("luasettings")
-    DataStorage = require("datastorage")
     Blitbuffer = require("ffi/blitbuffer")
     ButtonTable = require("ui/widget/buttontable")
     CenterContainer = require("ui/widget/container/centercontainer")
-    Font = require("ui/font")
     FrameContainer = require("ui/widget/container/framecontainer")
     Geom = require("ui/geometry")
     InputContainer = require("ui/widget/container/inputcontainer")
     MovableContainer = require("ui/widget/container/movablecontainer")
     ScrollHtmlWidget = require("ui/widget/scrollhtmlwidget")
-    ScrollTextWidget = require("ui/widget/scrolltextwidget")
     Size = require("ui/size")
     TitleBar = require("ui/widget/titlebar")
     VerticalGroup = require("ui/widget/verticalgroup")
@@ -340,7 +335,7 @@ local function ensureMarkdownViewer()
         }
     end
 
-    function MarkdownViewer:onTapClose(arg, ges)
+    function MarkdownViewer:onTapClose(_arg, ges)
         if ges.pos:notIntersectWith(self.movable.dimen) then
             UIManager:close(self)
             return true
@@ -453,7 +448,7 @@ local function compareVersions(v1, v2)
 end
 
 -- Platform-specific binary paths
-local mv_bin, cp_bin
+local mv_bin
 local function getBinPaths()
     if mv_bin then return end
     local is_android = false
@@ -464,7 +459,6 @@ local function getBinPaths()
         if ok and D and D.isAndroid then is_android = D:isAndroid() or false end
     end
     mv_bin = is_android and "/system/bin/mv" or "/bin/mv"
-    cp_bin = is_android and "/system/bin/cp" or "/bin/cp"
 end
 
 -- Forward declaration
@@ -1021,7 +1015,7 @@ performUpdate = function(update_info)
     local backup_base = plugins_parent .. "FolioSync.koplugin.backup"
 
     local function updateFailed(msg, cleanup_paths)
-        for _idx, path in ipairs(cleanup_paths or {}) do
+        for _, path in ipairs(cleanup_paths or {}) do
             local attr = lfs.attributes(path, "mode")
             if attr == "file" then
                 os.remove(path)
@@ -1198,7 +1192,7 @@ function UpdateChecker.checkForUpdates(auto, include_prereleases)
         local latest_release = nil
         local latest_version_str = nil
 
-        for _idx, release in ipairs(releases) do
+        for _, release in ipairs(releases) do
             if not release.draft then
                 if include_prereleases or not release.prerelease then
                     local version_str = extractVersion(release.tag_name)
@@ -1239,7 +1233,7 @@ function UpdateChecker.checkForUpdates(auto, include_prereleases)
         if comparison < 0 then
             local zip_url = nil
             if latest_release.assets then
-                for _idx, asset in ipairs(latest_release.assets) do
+                for _, asset in ipairs(latest_release.assets) do
                     if asset.name and asset.name:match("%.zip$") then
                         zip_url = asset.browser_download_url
                         break

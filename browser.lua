@@ -378,7 +378,7 @@ function FolioBrowser:prompt_sort_by()
         text = _("Create Series Folders") .. (self.plugin.settings.create_series_folders ~= false and " ✓" or ""),
         callback = function()
             UIManager:close(menu)
-            self.plugin.settings.create_series_folders = not (self.plugin.settings.create_series_folders ~= false)
+            self.plugin.settings.create_series_folders = self.plugin.settings.create_series_folders == false
             self.plugin:save_settings()
         end,
     })
@@ -674,7 +674,6 @@ function FolioBrowser:start_download(book, download_dir)
                         ok_text = _("Open Book"),
                         cancel_text = _("Close"),
                         ok_callback = function()
-                            local Event = require("ui/event")
                             local ReaderUI = require("apps/reader/readerui")
                             UIManager:broadcastEvent(Event:new("SetupShowReader"))
                             ReaderUI:showReader(target_path)

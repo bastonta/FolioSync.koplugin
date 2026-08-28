@@ -378,14 +378,18 @@ function FolioAPI:get_progress(book_id, callback)
     local base_url = self:get_server_url()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/progress?format=xpointer"
 
+    logger.info("FolioSync API: GET progress -> " .. url)
+
     local http = get_http_client()
     if not http then
+        logger.warn("FolioSync API: GET progress failed - HTTP client unavailable")
         if callback then callback(false, "HTTP client unavailable") end
         return false
     end
 
     local response, err = http.get(url, self:get_headers())
     if not response then
+        logger.warn("FolioSync API: GET progress network error: " .. tostring(err))
         if callback then callback(false, tostring(err)) end
         return false
     end
@@ -396,11 +400,15 @@ function FolioAPI:get_progress(book_id, callback)
     if code >= 200 and code < 300 then
         local ok, data = pcall(json.decode, body)
         if ok and data then
+            logger.info(string.format("FolioSync API: received progress for book %s (HTTP %s): %s",
+                tostring(book_id), tostring(code), tostring(body)))
             if callback then callback(true, data) end
             return true, data
         end
     end
 
+    logger.warn(string.format("FolioSync API: GET progress failed for book %s (HTTP %s): %s",
+        tostring(book_id), tostring(code), tostring(body)))
     if callback then callback(false, "HTTP " .. tostring(code)) end
     return false
 end
@@ -426,25 +434,33 @@ function FolioAPI:update_progress(book_id, location, progress_percent, is_read, 
     end
 
     local payload = json.encode(body_tab)
+    logger.info(string.format("FolioSync API: PUT progress -> %s, payload: %s", url, payload))
 
     local http = get_http_client()
     if not http then
+        logger.warn("FolioSync API: PUT progress failed - HTTP client unavailable")
         if callback then callback(false, "HTTP client unavailable") end
         return false
     end
 
     local response, err = http.put(url, payload, self:get_headers())
     if not response then
+        logger.warn("FolioSync API: PUT progress network error: " .. tostring(err))
         if callback then callback(false, tostring(err)) end
         return false
     end
 
     local code = response.code or response.status or 0
+    local body = response.body or response.content or ""
     if code >= 200 and code < 300 then
+        logger.info(string.format("FolioSync API: progress updated successfully for book %s (HTTP %s)",
+            tostring(book_id), tostring(code)))
         if callback then callback(true) end
         return true
     end
 
+    logger.warn(string.format("FolioSync API: PUT progress failed for book %s (HTTP %s): %s",
+        tostring(book_id), tostring(code), tostring(body)))
     if callback then callback(false, "HTTP " .. tostring(code)) end
     return false
 end
@@ -454,8 +470,8 @@ function FolioAPI:set_read_status(book_id, is_read, callback)
 end
 
 function FolioAPI:list_annotations(book_id, since_or_cb, maybe_callback)
-    local since = nil
-    local callback = nil
+    local since
+    local callback
     if type(since_or_cb) == "function" then
         callback = since_or_cb
     else
@@ -597,8 +613,8 @@ function FolioAPI:delete_annotation(book_id, annotation_id, callback)
 end
 
 function FolioAPI:list_bookmarks(book_id, since_or_cb, maybe_callback)
-    local since = nil
-    local callback = nil
+    local since
+    local callback
     if type(since_or_cb) == "function" then
         callback = since_or_cb
     else

@@ -270,8 +270,10 @@ function Manager:get_doc_info(ui, document)
     if not location and current_page then
         location = string.format("page_%d", current_page)
     end
-    if percent == 0 and total_pages > 0 and current_page > 1 then
-        percent = (current_page / total_pages) * 100
+    if current_page == 1 and total_pages > 1 then
+        percent = 0.0
+    elseif percent == 0 and total_pages > 0 and current_page > 1 then
+        percent = ((current_page - 1) / total_pages) * 100
     end
     if percent > 0 and percent <= 1 then
         percent = percent * 100
@@ -374,8 +376,8 @@ end
 -- Get or resolve Folio book_id for current document
 function Manager:resolve_book_id(ui_or_doc, callback_or_doc, maybe_callback)
     local ui = self.ui
-    local document = nil
-    local callback = nil
+    local document
+    local callback
 
     if type(callback_or_doc) == "function" then
         callback = callback_or_doc
@@ -483,6 +485,9 @@ function Manager:sync_progress(ui, document, is_silent)
         local location = info.location
         local is_read = self:get_doc_read_status(info)
 
+        logger.info(string.format("FolioSync Manager: syncing progress for book_id=%s, local percent=%.1f%%, location=%s, is_read=%s",
+            tostring(book_id), percent or 0, tostring(location), tostring(is_read)))
+
         -- Fetch remote progress first
         self.api:get_progress(book_id, function(success, remote_data)
             local should_push = true
@@ -501,6 +506,23 @@ function Manager:sync_progress(ui, document, is_silent)
                 if remote_percent > percent and not is_silent then
                     logger.info(string.format("FolioSync: remote progress (%d%%) ahead of local (%d%%)",
                         math.floor(remote_percent), math.floor(percent)))
+                end
+
+                -- Do not overwrite remote progress if remote is ahead and local is not marked as read
+                if not is_read and (remote_percent > percent + 0.1) then
+                    logger.info(string.format("FolioSync: remote progress (%.1f%%) is ahead of local (%.1f%%), skipping push to avoid overwriting",
+                        remote_percent, percent))
+                    should_push = false
+
+                    -- If local is on page 1 / start, navigate to remote position
+                    if is_silent and (percent == 0 or info.current_page == 1) then
+                        local remote_pos = remote_data.location
+                        local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
+                        local target_doc = info.document or (target_ui and target_ui.document) or document
+                        if (remote_pos and remote_pos ~= "") or (remote_percent and remote_percent > 0) then
+                            self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc)
+                        end
+                    end
                 end
             end
 
@@ -565,11 +587,10 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
 
             local docsettings = info.docsettings
             local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
-            local target_doc = info.document or (target_ui and target_ui.document) or document
             local raw_items = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
 
             for _, l_item in ipairs(raw_items) do
-                annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
+                annotations_helper.sanitize_koreader_annotation(l_item)
             end
 
             local modified_raw = false
@@ -602,7 +623,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 end
 
                 for _, r_item in ipairs(remote_annos) do
-                    local converted = annotations_helper.folio_to_koreader_annotation(r_item, target_doc)
+                    local converted = annotations_helper.folio_to_koreader_annotation(r_item)
                     local found = false
                     for _, l_item in ipairs(raw_items) do
                         if annotations_helper.is_annotation(l_item) and (annotations_helper.is_same_annotation(l_item, r_item) or annotations_helper.is_same_annotation(l_item, converted)) then
@@ -727,10 +748,8 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 -- 4. New remote items -> pull
                 for _, r_item in ipairs(remote_annos) do
                     -- Skip items we just deleted locally in step 1
-                    if r_item.id and locally_deleted_ids[r_item.id] then
-                        -- noop: this annotation was just deleted locally, don't re-add
-                    else
-                        local converted = annotations_helper.folio_to_koreader_annotation(r_item, target_doc)
+                    if not (r_item.id and locally_deleted_ids[r_item.id]) then
+                        local converted = annotations_helper.folio_to_koreader_annotation(r_item)
                         local in_state = false
                         for _, snap in pairs(state_annos) do
                             if annotations_helper.is_same_annotation(converted, snap) or (snap.folio_id and r_item.id and snap.folio_id == r_item.id) then
@@ -865,11 +884,10 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
 
             local docsettings = info.docsettings
             local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
-            local target_doc = info.document or (target_ui and target_ui.document) or document
             local raw_items = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
 
             for _, l_item in ipairs(raw_items) do
-                annotations_helper.sanitize_koreader_annotation(l_item, target_doc)
+                annotations_helper.sanitize_koreader_annotation(l_item)
             end
 
             local modified_raw = false
@@ -1019,9 +1037,7 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                 -- 4. New remote bookmarks -> pull
                 for _, r_bm in ipairs(remote_bms) do
                     -- Skip items we just deleted locally in step 1
-                    if r_bm.id and locally_deleted_ids[r_bm.id] then
-                        -- noop: this bookmark was just deleted locally, don't re-add
-                    else
+                    if not (r_bm.id and locally_deleted_ids[r_bm.id]) then
                         local converted = annotations_helper.folio_to_koreader_bookmark(r_bm)
                         local in_state = false
                         for _, snap in pairs(state_bms) do
@@ -1145,7 +1161,6 @@ end
 -- Navigate reader UI to position/page specified by location or percentage
 function Manager:goto_location(target_ui, remote_pos, remote_percent, total_pages, target_doc)
     local UIMgr = require("ui/uimanager")
-    local Event = require("ui/event")
 
     -- 1. Robust UI Resolution: find an active ReaderUI instance with document and handleEvent
     local ui = nil
@@ -1230,8 +1245,6 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
                 end
             end
         end
-
-        local valid_xp = best_xp or remote_pos
 
         -- Method A: KOReader's native ReaderLink widget (best precision: moves page AND scrolls to element)
         if best_xp and ui.link and ui.link.onGotoLink then
@@ -1321,6 +1334,9 @@ function Manager:pull_progress(ui, document, force_manual, callback)
             return
         end
 
+        logger.info(string.format("FolioSync Manager: pulling progress for book_id=%s, title='%s'",
+            tostring(book_id), tostring(info.title)))
+
         if force_manual then
             utils.show_msg(_("Fetching reading progress from Folio..."))
         end
@@ -1336,11 +1352,14 @@ function Manager:pull_progress(ui, document, force_manual, callback)
                 local remote_is_read = remote_data.isRead
                 if remote_is_read == nil then remote_is_read = remote_data.is_read end
 
+                logger.info(string.format("FolioSync Manager: pulled remote progress for book_id=%s: percent=%s, location=%s, is_read=%s",
+                    tostring(book_id), tostring(remote_percent), tostring(remote_pos), tostring(remote_is_read)))
+
                 local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or
                     self.ui
                 local target_doc = info.document or (target_ui and target_ui.document) or document
 
-                if remote_pos and remote_pos ~= "" then
+                if (remote_pos and remote_pos ~= "") or (remote_percent and remote_percent > 0) then
                     self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc)
                 end
 

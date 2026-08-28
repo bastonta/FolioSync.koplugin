@@ -114,7 +114,7 @@ function Menus:get_settings_sub_menu()
                 return self.plugin.settings.create_series_folders ~= false
             end,
             callback = function()
-                self.plugin.settings.create_series_folders = not (self.plugin.settings.create_series_folders ~= false)
+                self.plugin.settings.create_series_folders = self.plugin.settings.create_series_folders == false
                 self.plugin:save_settings()
             end,
         },
@@ -134,7 +134,7 @@ function Menus:get_settings_sub_menu()
                 return self.plugin.settings.auto_check_updates ~= false
             end,
             callback = function()
-                self.plugin.settings.auto_check_updates = not (self.plugin.settings.auto_check_updates ~= false)
+                self.plugin.settings.auto_check_updates = self.plugin.settings.auto_check_updates == false
                 self.plugin:save_settings()
             end,
             separator = true,

@@ -63,9 +63,7 @@ function FolioSync:init()
     -- Auto-check for updates in background (20s delay, 24h interval, Wi-Fi check)
     if self.settings.auto_check_updates ~= false then
         local last_check = G_reader_settings and G_reader_settings:readSetting("foliosync_last_update_check")
-        if type(last_check) == "number" and os.time() - last_check < 24 * 60 * 60 then
-            -- Checked within 24h
-        else
+        if type(last_check) ~= "number" or os.time() - last_check >= 24 * 60 * 60 then
             local UIManager = require("ui/uimanager")
             UIManager:scheduleIn(20, function()
                 local NetworkMgr = require("ui/network/manager")
@@ -99,30 +97,29 @@ function FolioSync:onReaderReady()
     self:onDispatcherRegisterActions()
 
     if self.settings.auto_progress_sync then
-        local UIManager = require("ui/uimanager")
-        if UIManager and UIManager.scheduleIn then
-            UIManager:scheduleIn(1, function()
-                self:pull_and_sync_all()
-            end)
-        else
-            self:pull_and_sync_all()
-        end
+        self._is_pulling_on_open = true
+        self._last_progress_sync_time = os.time() + 5
+        self:pull_and_sync_all()
     end
 end
 
 function FolioSync:pull_and_sync_all(target_ui)
     local ui = target_ui or self:get_ui()
     if not (self.settings.auto_progress_sync and ui and ui.document) then
+        self._is_pulling_on_open = false
         return
     end
 
     local now = os.time()
     if self._last_pull_and_sync_time and (now - self._last_pull_and_sync_time) < 3 then
+        self._is_pulling_on_open = false
         return
     end
     self._last_pull_and_sync_time = now
 
-    self.manager:pull_progress(ui, nil, false, function(prog_ok)
+    self.manager:pull_progress(ui, nil, false, function(_prog_ok)
+        self._is_pulling_on_open = false
+        self._last_progress_sync_time = os.time()
         if self.settings.auto_progress_sync then
             local active_ui = self:get_ui()
             if active_ui and active_ui.document then
@@ -167,7 +164,10 @@ function FolioSync:save_settings()
     utils.write_json(SETTINGS_FILE, self.settings)
 end
 
-function FolioSync:onPageUpdate(page_number)
+function FolioSync:onPageUpdate(_page_number)
+    if self._is_pulling_on_open then
+        return
+    end
     local ui = self:get_ui()
     if self.settings.auto_progress_sync and ui and ui.document then
         local now = os.time()
@@ -205,7 +205,7 @@ function FolioSync:onResume()
     end
 end
 
-function FolioSync:onAnnotationsModified(items)
+function FolioSync:onAnnotationsModified(_items)
     if self.manager and self.manager.is_syncing_annotations then
         return
     end
@@ -279,7 +279,7 @@ end
 
 function FolioSync:onFolioSyncToggleSeriesFolders(enable)
     if enable == nil then
-        self.settings.create_series_folders = not (self.settings.create_series_folders ~= false)
+        self.settings.create_series_folders = self.settings.create_series_folders == false
     else
         self.settings.create_series_folders = enable
     end
