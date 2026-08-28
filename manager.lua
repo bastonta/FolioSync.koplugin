@@ -76,7 +76,6 @@ function Manager:invalidate_sync_state(file_path)
     if not sdr_dir then return end
     local sdr_path = sdr_dir .. "/folio_sync_state.json"
     os.remove(sdr_path)
-    logger.info("FolioSync Manager: invalidated sync state for " .. file_path)
 end
 
 -- Compute SHA-256 hash of a file (matches Folio server algorithm)
@@ -414,11 +413,9 @@ function Manager:resolve_book_id(ui_or_doc, callback_or_doc, maybe_callback)
     -- 2. Try to match by file hash via Folio API
     local file_hash = self:compute_file_hash(info.file)
     if file_hash then
-        logger.info("FolioSync Manager: resolving book_id by hash " .. file_hash)
         self.api:find_book_by_hash(file_hash, function(success, response)
             if success and response and response.id then
                 local book_id = response.id
-                logger.info("FolioSync Manager: matched hash to Folio book_id " .. tostring(book_id))
                 if info.docsettings and info.docsettings.saveSetting then
                     info.docsettings:saveSetting("folio_book_id", book_id)
                 end
@@ -427,12 +424,10 @@ function Manager:resolve_book_id(ui_or_doc, callback_or_doc, maybe_callback)
             end
 
             -- 3. Fallback: try to match by title / filename
-            logger.info("FolioSync Manager: hash lookup failed, falling back to title search")
             self:resolve_book_id_by_info(info, callback)
         end)
     else
         -- Hash computation failed, fall back to title search
-        logger.warn("FolioSync Manager: could not compute file hash, falling back to title search")
         self:resolve_book_id_by_info(info, callback)
     end
 end
@@ -441,19 +436,16 @@ end
 function Manager:resolve_book_id_by_info(info, callback)
     local title = info.title
 
-    logger.info("FolioSync Manager: resolving book_id by title " .. title)
     self.api:list_books(1, 10, title, function(success, response)
         if success and response and response.items and #response.items > 0 then
             local matched_book = response.items[1]
             local book_id = matched_book.id
-            logger.info("FolioSync Manager: matched " .. title .. " to Folio book_id " .. tostring(book_id))
 
             if info.docsettings and info.docsettings.saveSetting then
                 info.docsettings:saveSetting("folio_book_id", book_id)
             end
             if callback then callback(book_id) end
         else
-            logger.warn("FolioSync Manager: could not match " .. title .. " on Folio server")
             if callback then callback(nil) end
         end
     end)
@@ -485,9 +477,6 @@ function Manager:sync_progress(ui, document, is_silent)
         local location = info.location
         local is_read = self:get_doc_read_status(info)
 
-        logger.info(string.format("FolioSync Manager: syncing progress for book_id=%s, local percent=%.1f%%, location=%s, is_read=%s",
-            tostring(book_id), percent or 0, tostring(location), tostring(is_read)))
-
         -- Fetch remote progress first
         self.api:get_progress(book_id, function(success, remote_data)
             local should_push = true
@@ -498,31 +487,13 @@ function Manager:sync_progress(ui, document, is_silent)
 
                 -- If remote is marked as read and local is not marked as complete, update local status
                 if remote_is_read == true and not is_read then
-                    logger.info("FolioSync: remote book marked as read, updating local status to complete")
                     self:set_local_read_status(info, true, info.docsettings)
                     is_read = true
                 end
 
-                if remote_percent > percent and not is_silent then
-                    logger.info(string.format("FolioSync: remote progress (%d%%) ahead of local (%d%%)",
-                        math.floor(remote_percent), math.floor(percent)))
-                end
-
                 -- Do not overwrite remote progress if remote is ahead and local is not marked as read
                 if not is_read and (remote_percent > percent + 0.1) then
-                    logger.info(string.format("FolioSync: remote progress (%.1f%%) is ahead of local (%.1f%%), skipping push to avoid overwriting",
-                        remote_percent, percent))
                     should_push = false
-
-                    -- If local is on page 1 / start, navigate to remote position
-                    if is_silent and (percent == 0 or info.current_page == 1) then
-                        local remote_pos = remote_data.location
-                        local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
-                        local target_doc = info.document or (target_ui and target_ui.document) or document
-                        if (remote_pos and remote_pos ~= "") or (remote_percent and remote_percent > 0) then
-                            self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc)
-                        end
-                    end
                 end
             end
 
@@ -1143,8 +1114,6 @@ function Manager:push_all_data(ui, document, force_manual)
         local location = info.location
         local is_read = self:get_doc_read_status(info)
 
-        logger.info("FolioSync Manager: local progress: " .. percent .. ", location: " .. location .. ", is_read: " .. tostring(is_read))
-
         self.api:update_progress(book_id, location, percent, is_read, function(push_prog_ok)
             self:sync_annotations_and_bookmarks(ui, document, false)
             if force_manual then
@@ -1185,7 +1154,6 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
     end
 
     if not ui then
-        logger.warn("FolioSync Manager: cannot perform goto_location, ReaderUI not found")
         return false
     end
 
@@ -1193,8 +1161,6 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
 
     -- 2. If remote_pos is an XPointer string (starts with '/' or contains 'DocFragment' / 'text()')
     if type(remote_pos) == "string" and remote_pos ~= "" and not remote_pos:match("^page_%d+$") then
-        logger.info("FolioSync Manager: attempting jump to XPointer " .. tostring(remote_pos))
-
         local target_page = nil
         local best_xp = nil
 
@@ -1240,7 +1206,6 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
                 if ok and p and tonumber(p) and tonumber(p) > 0 then
                     target_page = tonumber(p)
                     best_xp = xp
-                    logger.info("FolioSync Manager: validated XPointer " .. tostring(xp) .. " -> page " .. tostring(target_page))
                     break
                 end
             end
@@ -1252,7 +1217,6 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
             local ok, res = pcall(function() return ui.link:onGotoLink({ xpointer = best_xp }) end)
             local curr_page_after = doc and doc.getCurrentPage and doc:getCurrentPage()
             if ok and (res == nil or res == true) and (not target_page or curr_page_after == target_page or (curr_page_before and curr_page_after ~= curr_page_before)) then
-                logger.info("FolioSync Manager: successfully jumped via ui.link:onGotoLink with " .. tostring(best_xp))
                 return true
             end
         end
@@ -1265,19 +1229,15 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
                 return r1 or r2
             end)
             if ok_event and res_event then
-                logger.info("FolioSync Manager: successfully jumped via GotoPos event")
                 return true
             end
         end
 
         -- Method C: Direct page jump via validated target_page
         if target_page and target_page > 0 then
-            logger.info("FolioSync Manager: jumping to validated page " .. tostring(target_page))
             ui:handleEvent(Event:new("GotoPage", target_page))
             return true
         end
-
-        logger.warn("FolioSync Manager: XPointer could not be resolved to any page: " .. tostring(remote_pos))
     end
 
     -- 3. Check if remote_pos is a page_N string (e.g. "page_15")
@@ -1285,7 +1245,6 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
         local target_page = remote_pos:match("^page_(%d+)$")
         if target_page then
             target_page = tonumber(target_page)
-            logger.info("FolioSync Manager: restoring position page " .. tostring(target_page))
             ui:handleEvent(Event:new("GotoPage", target_page))
             return true
         end
@@ -1295,13 +1254,10 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
     if remote_percent and total_pages and total_pages > 1 then
         local pct = tonumber(remote_percent) or 0
         local target_page = math.max(1, math.min(total_pages, math.floor((pct / 100) * total_pages + 0.5)))
-        logger.info("FolioSync Manager: jumping to page " ..
-            tostring(target_page) .. " via percentage fallback (" .. tostring(remote_percent) .. "%)")
         ui:handleEvent(Event:new("GotoPage", target_page))
         return true
     end
 
-    logger.warn("FolioSync Manager: could not navigate to remote location/page")
     return false
 end
 
@@ -1334,9 +1290,6 @@ function Manager:pull_progress(ui, document, force_manual, callback)
             return
         end
 
-        logger.info(string.format("FolioSync Manager: pulling progress for book_id=%s, title='%s'",
-            tostring(book_id), tostring(info.title)))
-
         if force_manual then
             utils.show_msg(_("Fetching reading progress from Folio..."))
         end
@@ -1351,9 +1304,6 @@ function Manager:pull_progress(ui, document, force_manual, callback)
                 end
                 local remote_is_read = remote_data.isRead
                 if remote_is_read == nil then remote_is_read = remote_data.is_read end
-
-                logger.info(string.format("FolioSync Manager: pulled remote progress for book_id=%s: percent=%s, location=%s, is_read=%s",
-                    tostring(book_id), tostring(remote_percent), tostring(remote_pos), tostring(remote_is_read)))
 
                 local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or
                     self.ui

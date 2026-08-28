@@ -38,6 +38,7 @@ package.loaded["logger"] = package.loaded["logger"] or {
     info = function(...) end,
     warn = function(...) end,
     error = function(...) end,
+    dbg = function(...) end,
 }
 package.loaded["gettext"] = package.loaded["gettext"] or function(s) return s end
 package.loaded["ffi/util"] = package.loaded["ffi/util"] or {
@@ -337,6 +338,53 @@ describe("FolioSync Manager Read Status Handling", function()
         assert.is_equal("/6/4", pushed_location)
         assert.is_equal(50, pushed_percent)
         assert.is_equal(true, pushed_is_read)
+    end)
+
+    it("does NOT call goto_location when local progress is behind remote progress (e.g. on page 1 or bookmark jump)", function()
+        local goto_location_called = false
+        local pushed = false
+
+        local fake_api = {
+            has_auth = function() return true end,
+            get_progress = function(self, book_id, cb)
+                cb(true, { progressPercent = 75, isRead = false, location = "/6/20" })
+            end,
+            update_progress = function(self, book_id, loc, pct, is_read, cb)
+                pushed = true
+                if cb then cb(true) end
+            end
+        }
+
+        local mock_ds = {
+            readSetting = function(self, k)
+                if k == "summary" then return { status = "reading" } end
+                if k == "folio_book_id" then return "uuid-book-123" end
+                return nil
+            end
+        }
+
+        local fake_ui = {
+            document = { file = "/books/test.epub" },
+            doc_settings = mock_ds,
+            getCurrentPage = function() return 1 end,
+            paging = {
+                getLastPercent = function() return 0 end,
+                getLastProgress = function() return "/6/1" end,
+            }
+        }
+
+        local mgr = setmetatable({
+            api = fake_api,
+            ui = fake_ui,
+            goto_location = function()
+                goto_location_called = true
+            end,
+        }, { __index = Manager })
+
+        mgr:sync_progress(fake_ui, fake_ui.document, true)
+
+        assert.is_false(goto_location_called)
+        assert.is_false(pushed)
     end)
 
     it("marks book as complete locally when remote_data.isRead is true during pull_all_data", function()

@@ -62,6 +62,9 @@ local function get_http_client()
             http_driver = sslhttps
         end
 
+        logger.info(string.format("FolioSync API: [HTTP %s] %s%s",
+            method or "GET", url or "nil", body and (" payload=" .. tostring(body)) or ""))
+
         local res, code, resp_headers
         if http_driver then
             res, code, resp_headers = http_driver.request(request_params)
@@ -74,14 +77,27 @@ local function get_http_client()
         end
 
         if res == nil then
+            logger.warn(string.format("FolioSync API: [HTTP %s] %s -> NETWORK ERROR: %s",
+                method or "GET", url or "nil", tostring(code)))
             return nil, tostring(code) -- code contains the error message on failure
+        end
+
+        local resp_str = table.concat(response_body)
+        local status_num = tonumber(code) or 0
+        if status_num >= 200 and status_num < 300 then
+            logger.info(string.format("FolioSync API: [HTTP %s] %s -> HTTP %s (%d bytes)%s",
+                method or "GET", url or "nil", tostring(code), #resp_str,
+                #resp_str > 0 and (" response=" .. resp_str:sub(1, 500)) or ""))
+        else
+            logger.warn(string.format("FolioSync API: [HTTP %s] %s -> HTTP %s: %s",
+                method or "GET", url or "nil", tostring(code), resp_str:sub(1, 500)))
         end
 
         return {
             code = code,
             status = code,
-            body = table.concat(response_body),
-            content = table.concat(response_body),
+            body = resp_str,
+            content = resp_str,
             headers = resp_headers,
         }
     end
@@ -344,7 +360,6 @@ function FolioAPI:download_book(book_id, save_path, callback)
         return false, "HTTP client unavailable"
     end
 
-    logger.info("FolioSync API: downloading book " .. tostring(book_id) .. " to " .. tostring(save_path))
     local response, err = http.get(url, self:get_headers())
     if not response then
         local msg = "Download failed: " .. tostring(err)
@@ -364,7 +379,6 @@ function FolioAPI:download_book(book_id, save_path, callback)
         end
         f:write(body)
         f:close()
-        logger.info("FolioSync API: book downloaded successfully (" .. tostring(#body) .. " bytes)")
         if callback then callback(true, save_path) end
         return true, save_path
     else
@@ -378,18 +392,14 @@ function FolioAPI:get_progress(book_id, callback)
     local base_url = self:get_server_url()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/progress?format=xpointer"
 
-    logger.info("FolioSync API: GET progress -> " .. url)
-
     local http = get_http_client()
     if not http then
-        logger.warn("FolioSync API: GET progress failed - HTTP client unavailable")
         if callback then callback(false, "HTTP client unavailable") end
         return false
     end
 
     local response, err = http.get(url, self:get_headers())
     if not response then
-        logger.warn("FolioSync API: GET progress network error: " .. tostring(err))
         if callback then callback(false, tostring(err)) end
         return false
     end
@@ -400,15 +410,11 @@ function FolioAPI:get_progress(book_id, callback)
     if code >= 200 and code < 300 then
         local ok, data = pcall(json.decode, body)
         if ok and data then
-            logger.info(string.format("FolioSync API: received progress for book %s (HTTP %s): %s",
-                tostring(book_id), tostring(code), tostring(body)))
             if callback then callback(true, data) end
             return true, data
         end
     end
 
-    logger.warn(string.format("FolioSync API: GET progress failed for book %s (HTTP %s): %s",
-        tostring(book_id), tostring(code), tostring(body)))
     if callback then callback(false, "HTTP " .. tostring(code)) end
     return false
 end
@@ -434,33 +440,25 @@ function FolioAPI:update_progress(book_id, location, progress_percent, is_read, 
     end
 
     local payload = json.encode(body_tab)
-    logger.info(string.format("FolioSync API: PUT progress -> %s, payload: %s", url, payload))
 
     local http = get_http_client()
     if not http then
-        logger.warn("FolioSync API: PUT progress failed - HTTP client unavailable")
         if callback then callback(false, "HTTP client unavailable") end
         return false
     end
 
     local response, err = http.put(url, payload, self:get_headers())
     if not response then
-        logger.warn("FolioSync API: PUT progress network error: " .. tostring(err))
         if callback then callback(false, tostring(err)) end
         return false
     end
 
     local code = response.code or response.status or 0
-    local body = response.body or response.content or ""
     if code >= 200 and code < 300 then
-        logger.info(string.format("FolioSync API: progress updated successfully for book %s (HTTP %s)",
-            tostring(book_id), tostring(code)))
         if callback then callback(true) end
         return true
     end
 
-    logger.warn(string.format("FolioSync API: PUT progress failed for book %s (HTTP %s): %s",
-        tostring(book_id), tostring(code), tostring(body)))
     if callback then callback(false, "HTTP " .. tostring(code)) end
     return false
 end
