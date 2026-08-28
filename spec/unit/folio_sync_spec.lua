@@ -885,3 +885,287 @@ describe("FolioSync Suspend & Resume & Event Handling", function()
     end)
 end)
 
+describe("FolioSync Footnote, Bookmark and Link Navigation Guards (Option 4)", function()
+    it("skips progress sync in onPageUpdate when user is inside a jump stack (ui.link.location_stack)", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local progress_synced = false
+        local fake_ui = {
+            document = { file = "/books/test.epub" },
+            link = { location_stack = { { page = 50 } } },
+        }
+
+        local fake_manager = {
+            get_doc_info = function(self, ui, doc)
+                return { percent = 95, location = "page_300" }
+            end,
+            sync_progress = function(self, ui, doc, silent)
+                progress_synced = true
+            end,
+        }
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        -- 1. In jump stack: onPageUpdate must NOT sync
+        instance:onPageUpdate(300)
+        assert.is_false(progress_synced)
+
+        -- 2. User presses Back -> stack emptied
+        fake_ui.link.location_stack = {}
+        instance._last_progress_sync_time = os.time() - 10
+        instance:onPageUpdate(50)
+        assert.is_true(progress_synced)
+    end)
+
+    it("skips progress sync in onPageUpdate when user is inside readerback location_stack", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local progress_synced = false
+        local fake_ui = {
+            document = { file = "/books/test.epub" },
+            readerback = { location_stack = { { page = 20 } } },
+        }
+
+        local fake_manager = {
+            get_doc_info = function(self, ui, doc)
+                return { percent = 80, location = "page_200" }
+            end,
+            sync_progress = function(self, ui, doc, silent)
+                progress_synced = true
+            end,
+        }
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        instance:onPageUpdate(200)
+        assert.is_false(progress_synced)
+    end)
+
+    it("applies smart jump dwell guard on large jumps and cancels on return to reading base", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local synced_percents = {}
+        local current_percent = 20
+        local fake_ui = { document = { file = "/books/test.epub" } }
+
+        local fake_manager = {
+            get_doc_info = function(self, ui, doc)
+                return { percent = current_percent, location = "pos" }
+            end,
+            sync_progress = function(self, ui, doc, silent)
+                table.insert(synced_percents, current_percent)
+            end,
+        }
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        -- 1. Normal reading at 20%
+        instance:onPageUpdate(50)
+        assert.is_equal(1, #synced_percents)
+        assert.is_equal(20, synced_percents[1])
+
+        -- 2. Sudden large jump to 95% (footnote / appendix)
+        current_percent = 95
+        instance._last_progress_sync_time = os.time() - 10
+        instance:onPageUpdate(300)
+        -- Dwell guard should prevent sync immediately
+        assert.is_equal(1, #synced_percents)
+        assert.is_not_nil(instance._jump_pending_since)
+        assert.is_equal(20, instance._jump_base_percent)
+
+        -- 3. Return back to 20% within dwell window
+        current_percent = 20
+        instance._last_progress_sync_time = os.time() - 10
+        instance:onPageUpdate(50)
+        -- Jump guard should cancel and sync normal 20%
+        assert.is_equal(2, #synced_percents)
+        assert.is_equal(20, synced_percents[2])
+        assert.is_nil(instance._jump_pending_since)
+    end)
+
+    it("accepts large jump after dwell time or 3 consecutive pages in jumped section", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local synced_percents = {}
+        local current_percent = 20
+        local fake_ui = { document = { file = "/books/test.epub" } }
+
+        local fake_manager = {
+            get_doc_info = function(self, ui, doc)
+                return { percent = current_percent, location = "pos" }
+            end,
+            sync_progress = function(self, ui, doc, silent)
+                table.insert(synced_percents, current_percent)
+            end,
+        }
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        -- 1. Initial 20%
+        instance:onPageUpdate(50)
+        assert.is_equal(1, #synced_percents)
+
+        -- 2. Large jump to 70%
+        current_percent = 70
+        instance._last_progress_sync_time = os.time() - 10
+        instance:onPageUpdate(200)
+        assert.is_equal(1, #synced_percents) -- not synced yet
+
+        -- 3. Next page in new chapter (consecutive page 2)
+        current_percent = 71
+        instance._last_progress_sync_time = os.time() - 10
+        instance:onPageUpdate(201)
+        assert.is_equal(1, #synced_percents) -- still in dwell
+
+        -- 4. Next page in new chapter (consecutive page 3)
+        current_percent = 72
+        instance._last_progress_sync_time = os.time() - 10
+        instance:onPageUpdate(202)
+        -- 3 consecutive pages in new section satisfied dwell condition!
+        assert.is_equal(2, #synced_percents)
+        assert.is_equal(72, synced_percents[2])
+    end)
+
+    it("skips progress sync on onCloseDocument and onSuspend if in jump stack or pending jump", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local sync_count = 0
+        local fake_ui = {
+            document = { file = "/books/test.epub" },
+            link = { location_stack = { { page = 10 } } },
+        }
+
+        local fake_manager = {
+            sync_progress = function(self, ui, doc, silent)
+                sync_count = sync_count + 1
+            end,
+        }
+
+        local instance = setmetatable({
+            settings = { auto_progress_sync = true },
+            ui = fake_ui,
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+        }, { __index = FolioSync })
+
+        instance:onSuspend()
+        assert.is_equal(0, sync_count)
+
+        instance:onCloseDocument()
+        assert.is_equal(0, sync_count)
+
+        -- Clear stack, but with active pending jump
+        fake_ui.link.location_stack = {}
+        instance._jump_pending_since = os.time()
+        instance:onSuspend()
+        assert.is_equal(0, sync_count)
+
+        instance:onCloseDocument()
+        assert.is_equal(0, sync_count)
+    end)
+
+    it("allows rollback in Manager:sync_progress if remote ahead progress was pushed by this session", function()
+        local Manager = require("manager")
+        local pushed_percent = nil
+
+        local fake_api = {
+            has_auth = function(self) return true end,
+            get_progress = function(self, book_id, callback)
+                -- Remote server has 95%
+                callback(true, { progressPercent = 95, isRead = false })
+            end,
+            update_progress = function(self, book_id, location, percent, is_read, callback)
+                pushed_percent = percent
+                callback(true)
+            end,
+        }
+
+        local mgr = Manager:new({ api = fake_api })
+        mgr.resolve_book_id = function(self, ui, doc, cb) cb("book_uuid_1") end
+        mgr.get_doc_read_status = function(self, info) return false end
+        mgr.get_doc_info = function(self, ui, doc)
+            return {
+                file = "/books/test.epub",
+                percent = 20,
+                location = "page_50",
+                total_pages = 250,
+                current_page = 50,
+            }
+        end
+
+        -- Record that this session previously pushed 95%
+        mgr._last_pushed_percent["book_uuid_1"] = 95
+
+        -- Now sync progress at 20%
+        mgr:sync_progress({}, {}, true)
+
+        -- Since 95% was our own push, rollback to 20% should be ALLOWED
+        assert.is_equal(20, pushed_percent)
+        assert.is_equal(20, mgr._last_pushed_percent["book_uuid_1"])
+    end)
+
+    it("blocks rollback in Manager:sync_progress if remote ahead progress was pushed by another device", function()
+        local Manager = require("manager")
+        local pushed_percent = nil
+
+        local fake_api = {
+            has_auth = function(self) return true end,
+            get_progress = function(self, book_id, callback)
+                -- Remote server has 95% from another device
+                callback(true, { progressPercent = 95, isRead = false })
+            end,
+            update_progress = function(self, book_id, location, percent, is_read, callback)
+                pushed_percent = percent
+                callback(true)
+            end,
+        }
+
+        local mgr = Manager:new({ api = fake_api })
+        mgr.resolve_book_id = function(self, ui, doc, cb) cb("book_uuid_1") end
+        mgr.get_doc_read_status = function(self, info) return false end
+        mgr.get_doc_info = function(self, ui, doc)
+            return {
+                file = "/books/test.epub",
+                percent = 20,
+                location = "page_50",
+                total_pages = 250,
+                current_page = 50,
+            }
+        end
+
+        -- This session only pushed 15% previously (95% came from another device)
+        mgr._last_pushed_percent["book_uuid_1"] = 15
+
+        -- Now sync progress at 20%
+        mgr:sync_progress({}, {}, true)
+
+        -- Remote 95% from another device is protected -> push blocked
+        assert.is_nil(pushed_percent)
+    end)
+end)
+

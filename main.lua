@@ -96,6 +96,12 @@ function FolioSync:onReaderReady()
     end
     self:onDispatcherRegisterActions()
 
+    self._last_reading_percent = nil
+    self._jump_base_percent = nil
+    self._jump_pending_since = nil
+    self._jump_pending_percent = nil
+    self._consecutive_jump_pages = nil
+
     if self.settings.auto_progress_sync then
         self._is_pulling_on_open = true
         self._last_progress_sync_time = os.time() + 5
@@ -140,6 +146,18 @@ function FolioSync:get_ui()
     return self.ui
 end
 
+function FolioSync:is_in_jump_stack(ui)
+    local target_ui = ui or self:get_ui()
+    if not target_ui then return false end
+    if target_ui.link and target_ui.link.location_stack and #target_ui.link.location_stack > 0 then
+        return true
+    end
+    if target_ui.readerback and target_ui.readerback.location_stack and #target_ui.readerback.location_stack > 0 then
+        return true
+    end
+    return false
+end
+
 function FolioSync:load_settings()
     local data = utils.read_json(SETTINGS_FILE) or {}
     if not data.server_url then
@@ -169,26 +187,83 @@ function FolioSync:onPageUpdate(_page_number)
         return
     end
     local ui = self:get_ui()
-    if self.settings.auto_progress_sync and ui and ui.document then
-        local now = os.time()
-        if not self._last_progress_sync_time or (now - self._last_progress_sync_time) >= 5 then
-            self._last_progress_sync_time = now
-            self.manager:sync_progress(ui, ui.document, true)
+    if not (self.settings.auto_progress_sync and ui and ui.document) then
+        return
+    end
+
+    -- 1. Check if user is currently in a link / footnote / bookmark jump stack
+    if self:is_in_jump_stack(ui) then
+        return
+    end
+
+    local now = os.time()
+    local info = self.manager and self.manager.get_doc_info and self.manager:get_doc_info(ui, ui.document)
+    local percent = info and info.percent
+
+    -- 2. Smart Jump Dwell Guard: detect large position jumps (> 5%)
+    if percent then
+        if self._last_reading_percent and math.abs(percent - self._last_reading_percent) > 5.0 then
+            -- Check if user returned back to the baseline reading position
+            if self._jump_base_percent and math.abs(percent - self._jump_base_percent) <= 2.0 then
+                -- Returned back to baseline reading position
+                self._last_reading_percent = percent
+                self._jump_base_percent = nil
+                self._jump_pending_since = nil
+                self._jump_pending_percent = nil
+                self._consecutive_jump_pages = nil
+            else
+                -- In a large jump
+                if not self._jump_pending_since or (self._jump_pending_percent and math.abs(percent - self._jump_pending_percent) > 5.0) then
+                    self._jump_base_percent = self._last_reading_percent
+                    self._jump_pending_percent = percent
+                    self._jump_pending_since = now
+                    self._consecutive_jump_pages = 1
+                    return
+                else
+                    self._consecutive_jump_pages = (self._consecutive_jump_pages or 1) + 1
+                    local dwell_time = now - self._jump_pending_since
+                    if dwell_time < 45 and (self._consecutive_jump_pages or 1) < 3 then
+                        -- Still in dwell period, do not push yet
+                        return
+                    end
+                    -- Dwell period satisfied: accept new reading baseline
+                    self._last_reading_percent = percent
+                    self._jump_base_percent = nil
+                    self._jump_pending_since = nil
+                    self._jump_pending_percent = nil
+                    self._consecutive_jump_pages = nil
+                end
+            end
+        else
+            self._last_reading_percent = percent
+            self._jump_base_percent = nil
+            self._jump_pending_since = nil
+            self._jump_pending_percent = nil
+            self._consecutive_jump_pages = nil
         end
+    end
+
+    if not self._last_progress_sync_time or (now - self._last_progress_sync_time) >= 5 then
+        self._last_progress_sync_time = now
+        self.manager:sync_progress(ui, ui.document, true)
     end
 end
 
 function FolioSync:onCloseDocument()
     local ui = self:get_ui()
     if self.settings.auto_progress_sync and ui and ui.document then
-        self.manager:sync_progress(ui, ui.document, true)
+        if not self:is_in_jump_stack(ui) and not self._jump_pending_since then
+            self.manager:sync_progress(ui, ui.document, true)
+        end
     end
 end
 
 function FolioSync:onSuspend()
     local ui = self:get_ui()
     if self.settings.auto_progress_sync and ui and ui.document then
-        self.manager:sync_progress(ui, ui.document, true)
+        if not self:is_in_jump_stack(ui) and not self._jump_pending_since then
+            self.manager:sync_progress(ui, ui.document, true)
+        end
     end
 end
 

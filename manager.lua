@@ -12,6 +12,7 @@ function Manager:new(plugin_instance)
     local o = {
         plugin = plugin_instance,
         api = plugin_instance.api,
+        _last_pushed_percent = {},
     }
     setmetatable(o, self)
     self.__index = self
@@ -491,16 +492,26 @@ function Manager:sync_progress(ui, document, is_silent)
                     is_read = true
                 end
 
-                -- Do not overwrite remote progress if remote is ahead and local is not marked as read
+                -- Do not overwrite remote progress if remote is ahead and local is not marked as read,
+                -- UNLESS the remote progress matches our own last push in this session (local rollback/correction)
                 if not is_read and (remote_percent > percent + 0.1) then
-                    should_push = false
+                    local my_last_pushed = self._last_pushed_percent and self._last_pushed_percent[book_id]
+                    if my_last_pushed and math.abs(remote_percent - my_last_pushed) < 0.2 then
+                        should_push = true
+                    else
+                        should_push = false
+                    end
                 end
             end
 
             if should_push then
                 self.api:update_progress(book_id, location, percent, is_read, function(push_ok)
-                    if push_ok and not is_silent then
-                        utils.show_msg(T(_("Progress synced to Folio (%1%)"), math.floor(percent)))
+                    if push_ok then
+                        self._last_pushed_percent = self._last_pushed_percent or {}
+                        self._last_pushed_percent[book_id] = percent
+                        if not is_silent then
+                            utils.show_msg(T(_("Progress synced to Folio (%1%)"), math.floor(percent)))
+                        end
                     end
                 end)
             end
@@ -1115,6 +1126,10 @@ function Manager:push_all_data(ui, document, force_manual)
         local is_read = self:get_doc_read_status(info)
 
         self.api:update_progress(book_id, location, percent, is_read, function(push_prog_ok)
+            if push_prog_ok then
+                self._last_pushed_percent = self._last_pushed_percent or {}
+                self._last_pushed_percent[book_id] = percent
+            end
             self:sync_annotations_and_bookmarks(ui, document, false)
             if force_manual then
                 if push_prog_ok then
