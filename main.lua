@@ -146,18 +146,6 @@ function FolioSync:get_ui()
     return self.ui
 end
 
-function FolioSync:is_in_jump_stack(ui)
-    local target_ui = ui or self:get_ui()
-    if not target_ui then return false end
-    if target_ui.link and target_ui.link.location_stack and #target_ui.link.location_stack > 0 then
-        return true
-    end
-    if target_ui.readerback and target_ui.readerback.location_stack and #target_ui.readerback.location_stack > 0 then
-        return true
-    end
-    return false
-end
-
 function FolioSync:load_settings()
     local data = utils.read_json(SETTINGS_FILE) or {}
     if not data.server_url then
@@ -191,16 +179,11 @@ function FolioSync:onPageUpdate(_page_number)
         return
     end
 
-    -- 1. Check if user is currently in a link / footnote / bookmark jump stack
-    if self:is_in_jump_stack(ui) then
-        return
-    end
-
     local now = os.time()
     local info = self.manager and self.manager.get_doc_info and self.manager:get_doc_info(ui, ui.document)
     local percent = info and info.percent
 
-    -- 2. Smart Jump Dwell Guard: detect large position jumps (> 5%)
+    -- Smart Jump Dwell Guard: detect large position jumps (> 5%)
     if percent then
         if self._last_reading_percent and math.abs(percent - self._last_reading_percent) > 5.0 then
             -- Check if user returned back to the baseline reading position
@@ -252,7 +235,7 @@ end
 function FolioSync:onCloseDocument()
     local ui = self:get_ui()
     if self.settings.auto_progress_sync and ui and ui.document then
-        if not self:is_in_jump_stack(ui) and not self._jump_pending_since then
+        if not self._jump_pending_since then
             self.manager:sync_progress(ui, ui.document, true)
         end
     end
@@ -261,7 +244,7 @@ end
 function FolioSync:onSuspend()
     local ui = self:get_ui()
     if self.settings.auto_progress_sync and ui and ui.document then
-        if not self:is_in_jump_stack(ui) and not self._jump_pending_since then
+        if not self._jump_pending_since then
             self.manager:sync_progress(ui, ui.document, true)
         end
     end
