@@ -886,7 +886,7 @@ describe("FolioSync Suspend & Resume & Event Handling", function()
 end)
 
 describe("FolioSync Footnote, Bookmark and Link Navigation Guards (Option 4)", function()
-    it("skips progress sync in onPageUpdate when user is inside a jump stack (ui.link.location_stack)", function()
+    it("allows progress sync during normal reading even when location_stack is non-empty", function()
         package.loaded["main"] = nil
         local FolioSync = require("main")
 
@@ -894,48 +894,12 @@ describe("FolioSync Footnote, Bookmark and Link Navigation Guards (Option 4)", f
         local fake_ui = {
             document = { file = "/books/test.epub" },
             link = { location_stack = { { page = 50 } } },
-        }
-
-        local fake_manager = {
-            get_doc_info = function(self, ui, doc)
-                return { percent = 95, location = "page_300" }
-            end,
-            sync_progress = function(self, ui, doc, silent)
-                progress_synced = true
-            end,
-        }
-
-        local instance = setmetatable({
-            settings = { auto_progress_sync = true },
-            ui = fake_ui,
-            manager = fake_manager,
-            get_ui = function(self) return fake_ui end,
-        }, { __index = FolioSync })
-
-        -- 1. In jump stack: onPageUpdate must NOT sync
-        instance:onPageUpdate(300)
-        assert.is_false(progress_synced)
-
-        -- 2. User presses Back -> stack emptied
-        fake_ui.link.location_stack = {}
-        instance._last_progress_sync_time = os.time() - 10
-        instance:onPageUpdate(50)
-        assert.is_true(progress_synced)
-    end)
-
-    it("skips progress sync in onPageUpdate when user is inside readerback location_stack", function()
-        package.loaded["main"] = nil
-        local FolioSync = require("main")
-
-        local progress_synced = false
-        local fake_ui = {
-            document = { file = "/books/test.epub" },
             readerback = { location_stack = { { page = 20 } } },
         }
 
         local fake_manager = {
             get_doc_info = function(self, ui, doc)
-                return { percent = 80, location = "page_200" }
+                return { percent = 20, location = "page_50" }
             end,
             sync_progress = function(self, ui, doc, silent)
                 progress_synced = true
@@ -949,8 +913,9 @@ describe("FolioSync Footnote, Bookmark and Link Navigation Guards (Option 4)", f
             get_ui = function(self) return fake_ui end,
         }, { __index = FolioSync })
 
-        instance:onPageUpdate(200)
-        assert.is_false(progress_synced)
+        -- Autosync should proceed despite location_stack
+        instance:onPageUpdate(50)
+        assert.is_true(progress_synced)
     end)
 
     it("applies smart jump dwell guard on large jumps and cancels on return to reading base", function()
@@ -1050,7 +1015,7 @@ describe("FolioSync Footnote, Bookmark and Link Navigation Guards (Option 4)", f
         assert.is_equal(72, synced_percents[2])
     end)
 
-    it("skips progress sync on onCloseDocument and onSuspend if in jump stack or pending jump", function()
+    it("skips progress sync on onCloseDocument and onSuspend if pending jump guard is active", function()
         package.loaded["main"] = nil
         local FolioSync = require("main")
 
@@ -1073,20 +1038,20 @@ describe("FolioSync Footnote, Bookmark and Link Navigation Guards (Option 4)", f
             get_ui = function(self) return fake_ui end,
         }, { __index = FolioSync })
 
+        -- Without pending jump guard, sync is executed
         instance:onSuspend()
-        assert.is_equal(0, sync_count)
+        assert.is_equal(1, sync_count)
 
         instance:onCloseDocument()
-        assert.is_equal(0, sync_count)
+        assert.is_equal(2, sync_count)
 
-        -- Clear stack, but with active pending jump
-        fake_ui.link.location_stack = {}
+        -- With active pending jump guard, sync is suppressed
         instance._jump_pending_since = os.time()
         instance:onSuspend()
-        assert.is_equal(0, sync_count)
+        assert.is_equal(2, sync_count)
 
         instance:onCloseDocument()
-        assert.is_equal(0, sync_count)
+        assert.is_equal(2, sync_count)
     end)
 
     it("allows rollback in Manager:sync_progress if remote ahead progress was pushed by this session", function()

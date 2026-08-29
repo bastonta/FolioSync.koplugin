@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-08-30
+
+### Fixed
+- Remove `is_in_jump_stack` check in `onPageUpdate`, `onCloseDocument`, and `onSuspend` to allow automatic background reading progress sync after Table of Contents, bookmark, and link navigation (relying safely on Smart Jump Dwell Guard).
+
 ## [0.3.3] - 2026-08-28
 
 ### Added
