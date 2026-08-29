@@ -16,6 +16,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Extract release notes from CHANGELOG.md
+        id: changelog
+        run: node scripts/extract-changelog.cjs
+
       - name: Compile translations
         run: |
           sudo apt-get update && sudo apt-get install -y gettext
@@ -36,5 +40,5 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           name: "FolioSync ${{ env.TAG }}"
-          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.changelog }}
           files: ${{ env.ARCHIVE }}
