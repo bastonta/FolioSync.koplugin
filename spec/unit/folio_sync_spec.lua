@@ -1277,4 +1277,308 @@ describe("FolioSync Parent Directory & XPointer Error Logging", function()
     end)
 end)
 
+describe("FolioSync Reading Statistics & Sessions Synchronization", function()
+    local temp_dir = os.getenv("TEMP") or os.getenv("TMP") or "/tmp"
+    temp_dir = temp_dir:gsub("\\", "/")
+    local test_book_path = temp_dir .. "/test_reading_stats.epub"
+    local sdr_dir = temp_dir .. "/test_reading_stats.sdr"
+    local sync_state_file = sdr_dir .. "/folio_sync_state.json"
+
+    before_each(function()
+        os.remove(sync_state_file)
+    end)
+
+    after_each(function()
+        os.remove(sync_state_file)
+    end)
+
+    it("FolioAPI:push_reading_sessions sends session batch to server", function()
+        local requested_url = nil
+        local requested_body = nil
+        local requested_headers = nil
+
+        package.loaded["socket.http"] = {
+            request = function(req)
+                requested_url = req.url
+                requested_headers = req.headers
+                if req.source then
+                    local chunks = {}
+                    while true do
+                        local chunk = req.source()
+                        if not chunk then break end
+                        table.insert(chunks, chunk)
+                    end
+                    requested_body = table.concat(chunks)
+                end
+                if req.sink then
+                    req.sink('{"inserted": 1}')
+                end
+                return 1, 200, {}
+            end
+        }
+        package.loaded["folio_api"] = nil
+        local FolioAPI = require("folio_api")
+        local api = FolioAPI:new({ server_url = "http://localhost:8080", api_key = "key123" })
+
+        local sessions = {
+            {
+                clientSessionId = "sess-1",
+                bookId = "book-uuid-1",
+                deviceName = "KOReader",
+                startTime = "2026-08-30T10:00:00Z",
+                endTime = "2026-08-30T10:30:00Z",
+                durationSeconds = 1800,
+                startProgress = 10,
+                endProgress = 20,
+                pagesRead = 15,
+            }
+        }
+
+        local callback_called = false
+        local callback_success = nil
+        local callback_data = nil
+
+        api:push_reading_sessions(sessions, function(ok, data)
+            callback_called = true
+            callback_success = ok
+            callback_data = data
+        end)
+
+        assert.is_true(callback_called)
+        assert.is_true(callback_success)
+        assert.is_equal("http://localhost:8080/statistics/sessions", requested_url)
+        assert.is_equal("key123", requested_headers["X-API-Key"])
+        assert.is_not_nil(requested_body)
+        assert.is_truthy(requested_body:find("sess%-1"))
+        assert.is_truthy(requested_body:find("book%-uuid%-1"))
+        assert.is_equal(1, callback_data.inserted)
+    end)
+
+    it("Manager:record_reading_session saves pending sessions in sync state", function()
+        local Manager = require("manager")
+        local mgr = Manager:new({})
+        mgr.get_doc_info = function(self, ui, doc)
+            return { file_path = test_book_path }
+        end
+
+        local session1 = {
+            client_session_id = "sess-100",
+            start_time = "2026-08-30T12:00:00Z",
+            end_time = "2026-08-30T12:15:00Z",
+            duration_seconds = 900,
+            start_progress = 5,
+            end_progress = 10,
+            pages_read = 8,
+        }
+
+        mgr:record_reading_session({}, {}, session1)
+
+        local state = mgr:load_sync_state(test_book_path)
+        assert.is_not_nil(state.pending_sessions)
+        assert.is_equal(1, #state.pending_sessions)
+        assert.is_equal("sess-100", state.pending_sessions[1].client_session_id)
+        assert.is_equal(900, state.pending_sessions[1].duration_seconds)
+    end)
+
+    it("Manager:sync_reading_sessions flushes pending sessions and keeps unpushed ones", function()
+        local Manager = require("manager")
+        local pushed_payload = nil
+
+        local fake_api = {
+            has_auth = function(self) return true end,
+            push_reading_sessions = function(self, payload, cb)
+                pushed_payload = payload
+                cb(true, { inserted = #payload })
+            end,
+        }
+
+        local mgr = Manager:new({ api = fake_api })
+        mgr.get_doc_info = function(self, ui, doc)
+            return { file_path = test_book_path }
+        end
+        mgr.resolve_book_id = function(self, ui, doc, cb)
+            cb("book-resolved-uuid")
+        end
+
+        -- Prepare two pending sessions
+        local initial_state = {
+            pending_sessions = {
+                {
+                    client_session_id = "s-1",
+                    start_time = "2026-08-30T10:00:00Z",
+                    end_time = "2026-08-30T10:10:00Z",
+                    duration_seconds = 600,
+                    start_progress = 0,
+                    end_progress = 5,
+                    pages_read = 5,
+                },
+                {
+                    client_session_id = "s-2",
+                    start_time = "2026-08-30T11:00:00Z",
+                    end_time = "2026-08-30T11:20:00Z",
+                    duration_seconds = 1200,
+                    start_progress = 5,
+                    end_progress = 15,
+                    pages_read = 10,
+                },
+            }
+        }
+        mgr:save_sync_state(initial_state, test_book_path)
+
+        local sync_called = false
+        mgr:sync_reading_sessions({}, {}, function(ok)
+            sync_called = true
+            assert.is_true(ok)
+        end)
+
+        assert.is_true(sync_called)
+        assert.is_not_nil(pushed_payload)
+        assert.is_equal(2, #pushed_payload)
+        assert.is_equal("book-resolved-uuid", pushed_payload[1].bookId)
+        assert.is_equal("s-1", pushed_payload[1].clientSessionId)
+        assert.is_equal("s-2", pushed_payload[2].clientSessionId)
+
+        -- Verify pending sessions were cleared
+        local after_state = mgr:load_sync_state(test_book_path)
+        assert.is_equal(0, #after_state.pending_sessions)
+    end)
+
+    it("FolioSync:_finalize_and_record_session adds dwell time on current page", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local recorded_session = nil
+        local fake_manager = {
+            get_doc_info = function(self, ui, doc)
+                return { percent = 18, file_path = test_book_path }
+            end,
+            record_reading_session = function(self, ui, doc, sdata)
+                recorded_session = sdata
+            end,
+        }
+
+        local fake_ui = { document = { file = test_book_path } }
+        local instance = setmetatable({
+            manager = fake_manager,
+            get_ui = function(self) return fake_ui end,
+            _session_start_time = os.time() - 120,
+            _session_last_active = os.time() - 30,
+            _session_active_duration = 60,
+            _session_pages_count = 2,
+            _session_start_percent = 10,
+        }, { __index = FolioSync })
+
+        instance:_finalize_and_record_session(fake_ui, fake_ui.document)
+
+        assert.is_not_nil(recorded_session)
+        -- Duration was 60s + 30s dwell time on current page = 90s
+        assert.is_true(recorded_session.duration_seconds >= 89 and recorded_session.duration_seconds <= 91)
+        assert.is_equal(10, recorded_session.start_progress)
+        assert.is_equal(18, recorded_session.end_progress)
+        assert.is_equal(2, recorded_session.pages_read)
+    end)
+
+    it("Manager:push_all_data finalizes session and calls sync_reading_sessions", function()
+        local Manager = require("manager")
+        local session_finalized = false
+        local reading_sessions_synced = false
+
+        local fake_plugin = {
+            _finalize_and_record_session = function(self, ui, doc)
+                session_finalized = true
+            end,
+        }
+
+        local fake_api = {
+            has_auth = function(self) return true end,
+            update_progress = function(self, book_id, loc, pct, is_read, cb)
+                cb(true)
+            end,
+        }
+
+        local mgr = Manager:new(fake_plugin)
+        mgr.api = fake_api
+        mgr.resolve_book_id = function(self, ui, doc, cb) cb("book-id-1") end
+        mgr.get_doc_info = function(self, ui, doc) return { percent = 50, location = "pos" } end
+        mgr.get_doc_read_status = function(self, info) return false end
+        mgr.sync_annotations_and_bookmarks = function(self, ui, doc, force) end
+        mgr.sync_reading_sessions = function(self, ui, doc)
+            reading_sessions_synced = true
+        end
+        mgr:push_all_data({}, {}, true)
+
+        assert.is_true(session_finalized)
+        assert.is_true(reading_sessions_synced)
+    end)
+
+    it("tracks page turns in onPageUpdate even when auto_progress_sync is disabled", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local fake_ui = { document = { file = test_book_path } }
+        local fake_manager = {
+            get_doc_info = function(self, ui, doc)
+                return { percent = 58, current_page = 59, total_pages = 100, file_path = test_book_path }
+            end,
+        }
+
+        local instance = setmetatable({
+            manager = fake_manager,
+            settings = { auto_progress_sync = false },
+            get_ui = function(self) return fake_ui end,
+            _session_start_time = os.time() - 60,
+            _session_last_active = os.time() - 30,
+            _session_active_duration = 0,
+            _session_pages_count = 0,
+            _session_start_percent = 57.14,
+            _session_curr_page = 58,
+        }, { __index = FolioSync })
+
+        -- User turns from page 58 to page 59
+        instance:onPageUpdate(59)
+
+        assert.is_equal(1, instance._session_pages_count)
+        assert.is_equal(59, instance._session_curr_page)
+        assert.is_true(instance._session_active_duration >= 29)
+    end)
+
+    it("calculates pages_read from progress delta when pages_read count is 0", function()
+        package.loaded["main"] = nil
+        local FolioSync = require("main")
+
+        local recorded_session = nil
+        local fake_manager = {
+            get_doc_info = function(self, ui, doc)
+                return { percent = 58.05, total_pages = 200, file_path = test_book_path }
+            end,
+            record_reading_session = function(self, ui, doc, sdata)
+                recorded_session = sdata
+            end,
+        }
+
+        local fake_ui = { document = { file = test_book_path } }
+        local instance = setmetatable({
+            manager = fake_manager,
+            settings = { auto_progress_sync = false },
+            get_ui = function(self) return fake_ui end,
+            _session_start_time = os.time() - 43,
+            _session_last_active = os.time() - 43,
+            _session_active_duration = 0,
+            _session_pages_count = 0,
+            _session_start_percent = 57.14,
+        }, { __index = FolioSync })
+
+        instance:_finalize_and_record_session(fake_ui, fake_ui.document)
+
+        assert.is_not_nil(recorded_session)
+        assert.is_true(recorded_session.duration_seconds >= 42 and recorded_session.duration_seconds <= 44)
+        assert.is_equal(57.14, recorded_session.start_progress)
+        assert.is_equal(58.05, recorded_session.end_progress)
+        -- (58.05 - 57.14)/100 * 200 = 0.91 * 2 = 1.82 -> rounded = 2 pages
+        assert.is_equal(2, recorded_session.pages_read)
+    end)
+end)
+
+
+
 

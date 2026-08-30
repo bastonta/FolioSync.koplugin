@@ -102,11 +102,17 @@ function FolioSync:onReaderReady()
     self._jump_pending_percent = nil
     self._consecutive_jump_pages = nil
 
-    self._session_start_time = os.time()
-    self._session_last_active = os.time()
+    local now = os.time()
+    self._session_start_time = now
+    self._session_last_active = now
     self._session_active_duration = 0
     self._session_pages_count = 0
-    self._session_start_percent = nil
+    local target_ui = self:get_ui()
+    local doc = target_ui and target_ui.document
+    local init_info = (doc or target_ui) and self.manager and self.manager.get_doc_info and self.manager:get_doc_info(target_ui, doc)
+    self._session_start_percent = (init_info and init_info.percent) or 0
+    self._session_start_page = init_info and init_info.current_page
+    self._session_curr_page = self._session_start_page
 
     if self.settings.auto_progress_sync then
         self._is_pulling_on_open = true
@@ -134,9 +140,13 @@ function FolioSync:pull_and_sync_all(target_ui)
         self._last_progress_sync_time = os.time()
         if self.settings.auto_progress_sync then
             local active_ui = self:get_ui()
-            if active_ui and active_ui.document then
-                self.manager:sync_annotations_and_bookmarks(active_ui, active_ui.document, false)
-                self.manager:sync_reading_sessions(active_ui, active_ui.document)
+            if active_ui and active_ui.document and self.manager then
+                if self.manager.sync_annotations_and_bookmarks then
+                    self.manager:sync_annotations_and_bookmarks(active_ui, active_ui.document, false)
+                end
+                if self.manager.sync_reading_sessions then
+                    self.manager:sync_reading_sessions(active_ui, active_ui.document)
+                end
             end
         end
     end)
@@ -177,66 +187,19 @@ function FolioSync:save_settings()
     utils.write_json(SETTINGS_FILE, self.settings)
 end
 
-function FolioSync:onPageUpdate(_page_number)
+function FolioSync:onPageUpdate(page_number)
     if self._is_pulling_on_open then
         return
     end
     local ui = self:get_ui()
-    if not (self.settings.auto_progress_sync and ui and ui.document) then
+    if not (ui and ui.document) then
         return
     end
 
     local now = os.time()
     local info = self.manager and self.manager.get_doc_info and self.manager:get_doc_info(ui, ui.document)
     local percent = info and info.percent
-
-    -- Smart Jump Dwell Guard: detect large position jumps (> 5%)
-    if percent then
-        if self._last_reading_percent and math.abs(percent - self._last_reading_percent) > 5.0 then
-            -- Check if user returned back to the baseline reading position
-            if self._jump_base_percent and math.abs(percent - self._jump_base_percent) <= 2.0 then
-                -- Returned back to baseline reading position
-                self._last_reading_percent = percent
-                self._jump_base_percent = nil
-                self._jump_pending_since = nil
-                self._jump_pending_percent = nil
-                self._consecutive_jump_pages = nil
-            else
-                -- In a large jump
-                if not self._jump_pending_since or (self._jump_pending_percent and math.abs(percent - self._jump_pending_percent) > 5.0) then
-                    self._jump_base_percent = self._last_reading_percent
-                    self._jump_pending_percent = percent
-                    self._jump_pending_since = now
-                    self._consecutive_jump_pages = 1
-                    return
-                else
-                    self._consecutive_jump_pages = (self._consecutive_jump_pages or 1) + 1
-                    local dwell_time = now - self._jump_pending_since
-                    if dwell_time < 45 and (self._consecutive_jump_pages or 1) < 3 then
-                        -- Still in dwell period, do not push yet
-                        return
-                    end
-                    -- Dwell period satisfied: accept new reading baseline
-                    self._last_reading_percent = percent
-                    self._jump_base_percent = nil
-                    self._jump_pending_since = nil
-                    self._jump_pending_percent = nil
-                    self._consecutive_jump_pages = nil
-                end
-            end
-        else
-            self._last_reading_percent = percent
-            self._jump_base_percent = nil
-            self._jump_pending_since = nil
-            self._jump_pending_percent = nil
-            self._consecutive_jump_pages = nil
-        end
-    end
-
-    if not self._last_progress_sync_time or (now - self._last_progress_sync_time) >= 5 then
-        self._last_progress_sync_time = now
-        self.manager:sync_progress(ui, ui.document, true)
-    end
+    local current_page = page_number or (info and info.current_page)
 
     -- Track active reading session duration
     if self._session_last_active then
@@ -247,9 +210,78 @@ function FolioSync:onPageUpdate(_page_number)
         end
     end
     self._session_last_active = now
-    self._session_pages_count = (self._session_pages_count or 0) + 1
+
+    -- Track page turns / pages count
+    if current_page and self._session_curr_page then
+        if current_page ~= self._session_curr_page then
+            local page_diff = math.abs(current_page - self._session_curr_page)
+            if page_diff > 0 and page_diff <= 10 then
+                self._session_pages_count = (self._session_pages_count or 0) + page_diff
+            else
+                self._session_pages_count = (self._session_pages_count or 0) + 1
+            end
+            self._session_curr_page = current_page
+        end
+    else
+        self._session_pages_count = (self._session_pages_count or 0) + 1
+        if current_page then self._session_curr_page = current_page end
+    end
+
     if not self._session_start_percent and percent then
         self._session_start_percent = percent
+    end
+
+    -- Auto progress sync logic (only when auto_progress_sync is enabled)
+    if self.settings.auto_progress_sync then
+        -- Smart Jump Dwell Guard: detect large position jumps (> 5%)
+        if percent then
+            if self._last_reading_percent and math.abs(percent - self._last_reading_percent) > 5.0 then
+                -- Check if user returned back to the baseline reading position
+                if self._jump_base_percent and math.abs(percent - self._jump_base_percent) <= 2.0 then
+                    -- Returned back to baseline reading position
+                    self._last_reading_percent = percent
+                    self._jump_base_percent = nil
+                    self._jump_pending_since = nil
+                    self._jump_pending_percent = nil
+                    self._consecutive_jump_pages = nil
+                else
+                    -- In a large jump
+                    if not self._jump_pending_since or (self._jump_pending_percent and math.abs(percent - self._jump_pending_percent) > 5.0) then
+                        self._jump_base_percent = self._last_reading_percent
+                        self._jump_pending_percent = percent
+                        self._jump_pending_since = now
+                        self._consecutive_jump_pages = 1
+                        return
+                    else
+                        self._consecutive_jump_pages = (self._consecutive_jump_pages or 1) + 1
+                        local dwell_time = now - self._jump_pending_since
+                        if dwell_time < 45 and (self._consecutive_jump_pages or 1) < 3 then
+                            -- Still in dwell period, do not push yet
+                            return
+                        end
+                        -- Dwell period satisfied: accept new reading baseline
+                        self._last_reading_percent = percent
+                        self._jump_base_percent = nil
+                        self._jump_pending_since = nil
+                        self._jump_pending_percent = nil
+                        self._consecutive_jump_pages = nil
+                    end
+                end
+            else
+                self._last_reading_percent = percent
+                self._jump_base_percent = nil
+                self._jump_pending_since = nil
+                self._jump_pending_percent = nil
+                self._consecutive_jump_pages = nil
+            end
+        end
+
+        if not self._last_progress_sync_time or (now - self._last_progress_sync_time) >= 5 then
+            self._last_progress_sync_time = now
+            if self.manager and self.manager.sync_progress then
+                self.manager:sync_progress(ui, ui.document, true)
+            end
+        end
     end
 end
 
@@ -259,12 +291,37 @@ function FolioSync:_finalize_and_record_session(ui, document)
     if not (target_ui and doc) then return end
 
     local now = os.time()
+    if self._session_last_active then
+        local diff = now - self._session_last_active
+        -- If less than 3 minutes (180s) since last interaction, count time on current page
+        if diff > 0 and diff < 180 then
+            self._session_active_duration = (self._session_active_duration or 0) + diff
+        end
+    end
+
     local duration = math.floor(self._session_active_duration or 0)
     local start_time = self._session_start_time
 
     if start_time and duration >= 10 then
         local info = self.manager and self.manager.get_doc_info and self.manager:get_doc_info(target_ui, doc)
         local end_percent = info and info.percent or self._session_start_percent or 0
+        local pages_read = self._session_pages_count or 0
+
+        -- Fallback: if pages_read is 0, estimate from start_percent vs end_percent and total_pages
+        if pages_read == 0 and info and info.total_pages and info.total_pages > 0 and self._session_start_percent then
+            local pct_diff = math.abs(end_percent - self._session_start_percent)
+            if pct_diff > 0.01 then
+                local calc_pages = math.floor((pct_diff / 100) * info.total_pages + 0.5)
+                if calc_pages > 0 then
+                    pages_read = calc_pages
+                end
+            end
+        end
+
+        -- If user read for more than 15s, count at least 1 page read
+        if pages_read == 0 and duration >= 15 then
+            pages_read = 1
+        end
 
         local session_data = {
             client_session_id = utils.generate_uuid(),
@@ -274,10 +331,12 @@ function FolioSync:_finalize_and_record_session(ui, document)
             duration_seconds = duration,
             start_progress = self._session_start_percent or 0,
             end_progress = end_percent,
-            pages_read = self._session_pages_count or 0,
+            pages_read = pages_read,
         }
 
-        self.manager:record_reading_session(target_ui, doc, session_data)
+        if self.manager and self.manager.record_reading_session then
+            self.manager:record_reading_session(target_ui, doc, session_data)
+        end
     end
 
     -- Reset session tracker for next batch / session
@@ -287,17 +346,21 @@ function FolioSync:_finalize_and_record_session(ui, document)
     self._session_pages_count = 0
     local info = self.manager and self.manager.get_doc_info and self.manager:get_doc_info(target_ui, doc)
     self._session_start_percent = info and info.percent or 0
+    self._session_start_page = info and info.current_page
+    self._session_curr_page = self._session_start_page
 end
 
 function FolioSync:onCloseDocument()
     local ui = self:get_ui()
     if ui and ui.document then
         self:_finalize_and_record_session(ui, ui.document)
-        if self.settings.auto_progress_sync then
-            if not self._jump_pending_since then
+        if self.settings.auto_progress_sync and self.manager then
+            if not self._jump_pending_since and self.manager.sync_progress then
                 self.manager:sync_progress(ui, ui.document, true)
             end
-            self.manager:sync_reading_sessions(ui, ui.document)
+            if self.manager.sync_reading_sessions then
+                self.manager:sync_reading_sessions(ui, ui.document)
+            end
         end
     end
 end
@@ -306,11 +369,13 @@ function FolioSync:onSuspend()
     local ui = self:get_ui()
     if ui and ui.document then
         self:_finalize_and_record_session(ui, ui.document)
-        if self.settings.auto_progress_sync then
-            if not self._jump_pending_since then
+        if self.settings.auto_progress_sync and self.manager then
+            if not self._jump_pending_since and self.manager.sync_progress then
                 self.manager:sync_progress(ui, ui.document, true)
             end
-            self.manager:sync_reading_sessions(ui, ui.document)
+            if self.manager.sync_reading_sessions then
+                self.manager:sync_reading_sessions(ui, ui.document)
+            end
         end
     end
 end

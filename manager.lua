@@ -580,8 +580,20 @@ function Manager:sync_reading_sessions(ui, document, callback)
 
         self.api:push_reading_sessions(payload_sessions, function(success)
             if success then
-                sync_state.pending_sessions = {}
-                self:save_sync_state(sync_state, info.file_path)
+                local current_state = self:load_sync_state(info.file_path)
+                local current_pending = current_state.pending_sessions or {}
+                local sent_ids = {}
+                for _, s in ipairs(payload_sessions) do
+                    if s.clientSessionId then sent_ids[s.clientSessionId] = true end
+                end
+                local remaining = {}
+                for _, s in ipairs(current_pending) do
+                    if not (s.client_session_id and sent_ids[s.client_session_id]) then
+                        table.insert(remaining, s)
+                    end
+                end
+                current_state.pending_sessions = remaining
+                self:save_sync_state(current_state, info.file_path)
                 if callback then callback(true) end
             else
                 if callback then callback(false) end
@@ -1180,6 +1192,10 @@ function Manager:push_all_data(ui, document, force_manual)
         return
     end
 
+    if self.plugin and self.plugin._finalize_and_record_session then
+        self.plugin:_finalize_and_record_session(ui, document)
+    end
+
     self:resolve_book_id(ui, document, function(book_id)
         if not book_id then
             if force_manual then
@@ -1202,6 +1218,7 @@ function Manager:push_all_data(ui, document, force_manual)
                 self._last_pushed_percent[book_id] = percent
             end
             self:sync_annotations_and_bookmarks(ui, document, false)
+            self:sync_reading_sessions(ui, document)
             if force_manual then
                 if push_prog_ok then
                     utils.show_msg(T(_("All document data sent to Folio (%1%)!"), math.floor(percent)))
