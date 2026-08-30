@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-30
+
+### Added
+- Track and synchronize active reading sessions with Folio server, including duration, start/end progress, start/end time, and local pending session persistence across document close, suspend, and background auto-sync.
+- New API methods `push_reading_sessions` and `get_book_statistics` in `folio_api`.
+- Active reading timer with idle detection threshold (3 minutes) to pause tracking during inactivity.
+- Log XPointer navigation errors to `xpointer_errors.txt` in the parent directory above the book/download folder for easy troubleshooting of remote position mismatches.
+- Helper `utils.get_parent_dir` for resolving parent directories across platforms.
+- Extended unit test suite for reading session tracking, dwell time calculations, API push, and XPointer error logging.
+
+### Fixed
+- Include elapsed dwell time on current page when finalizing reading sessions so reading without page turns or final page reading time is accurately counted.
+- Initialize session start progress percentage correctly upon opening document in `onReaderReady`.
+- Guard manager synchronization handlers across reader lifecycle events.
+
 ## [0.3.4] - 2026-08-30
 
 ### Fixed
