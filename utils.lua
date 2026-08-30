@@ -156,5 +156,23 @@ function M.get_parent_dir(path)
     return clean
 end
 
+function M.iso8601(epoch)
+    local t = epoch or os.time()
+    return os.date("!%Y-%m-%dT%H:%M:%SZ", t)
+end
+
+function M.generate_uuid()
+    local ok, util = pcall(require, "util")
+    if ok and util and util.randomUUID then
+        return util.randomUUID()
+    end
+    -- Fallback UUIDv4 generator in pure Lua
+    local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+    return string.gsub(template, "[xy]", function(c)
+        local v = (c == "x") and math.random(0, 0xf) or math.random(8, 0xb)
+        return string.format("%x", v)
+    end)
+end
+
 return M
 

@@ -21,7 +21,7 @@ end
 
 -- Load sync state snapshot from <book>.sdr/folio_sync_state.json
 function Manager:load_sync_state(file_path)
-    local empty = { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {} }
+    local empty = { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {}, pending_sessions = {} }
     if not file_path or type(file_path) ~= "string" or file_path == "" then return empty end
 
     local sdr_dir = file_path:match("^(.*)%.%w+$") and (file_path:match("^(.*)%.%w+$") .. ".sdr")
@@ -40,6 +40,7 @@ function Manager:load_sync_state(file_path)
     if ok and type(data) == "table" then
         data.annotations = data.annotations or {}
         data.bookmarks = data.bookmarks or {}
+        data.pending_sessions = data.pending_sessions or {}
         return data
     end
     return empty
@@ -514,6 +515,76 @@ function Manager:sync_progress(ui, document, is_silent)
                         end
                     end
                 end)
+            end
+        end)
+    end)
+end
+
+-- Record a completed reading session locally in folio_sync_state.json
+function Manager:record_reading_session(ui, document, session_data)
+    if not session_data or not session_data.duration_seconds or session_data.duration_seconds < 10 then
+        return
+    end
+
+    local info = self:get_doc_info(ui, document)
+    if not info or not info.file_path then return end
+
+    local sync_state = self:load_sync_state(info.file_path)
+    sync_state.pending_sessions = sync_state.pending_sessions or {}
+
+    table.insert(sync_state.pending_sessions, session_data)
+    self:save_sync_state(sync_state, info.file_path)
+end
+
+-- Push pending reading sessions to Folio server
+function Manager:sync_reading_sessions(ui, document, callback)
+    if not self.api:has_auth() then
+        if callback then callback(false) end
+        return
+    end
+
+    local info = self:get_doc_info(ui, document)
+    if not info or not info.file_path then
+        if callback then callback(false) end
+        return
+    end
+
+    self:resolve_book_id(ui, document, function(book_id)
+        if not book_id then
+            if callback then callback(false) end
+            return
+        end
+
+        local sync_state = self:load_sync_state(info.file_path)
+        local pending = sync_state.pending_sessions or {}
+        if #pending == 0 then
+            if callback then callback(true) end
+            return
+        end
+
+        -- Prepare payload with resolved book_id
+        local payload_sessions = {}
+        for _, s in ipairs(pending) do
+            table.insert(payload_sessions, {
+                clientSessionId = s.client_session_id or utils.generate_uuid(),
+                bookId = book_id,
+                deviceName = s.device_name or "KOReader",
+                startTime = s.start_time,
+                endTime = s.end_time,
+                durationSeconds = s.duration_seconds,
+                startProgress = s.start_progress,
+                endProgress = s.end_progress,
+                pagesRead = s.pages_read or 0,
+            })
+        end
+
+        self.api:push_reading_sessions(payload_sessions, function(success)
+            if success then
+                sync_state.pending_sessions = {}
+                self:save_sync_state(sync_state, info.file_path)
+                if callback then callback(true) end
+            else
+                if callback then callback(false) end
             end
         end)
     end)

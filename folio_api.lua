@@ -467,6 +467,74 @@ function FolioAPI:set_read_status(book_id, is_read, callback)
     return self:update_progress(book_id, nil, nil, is_read, callback)
 end
 
+function FolioAPI:push_reading_sessions(sessions, callback)
+    if not sessions or #sessions == 0 then
+        if callback then callback(true, { inserted = 0 }) end
+        return true, { inserted = 0 }
+    end
+
+    local base_url = self:get_server_url()
+    local url = base_url .. "/statistics/sessions"
+    local payload = json.encode({ sessions = sessions })
+
+    local http = get_http_client()
+    if not http then
+        if callback then callback(false, "HTTP client unavailable") end
+        return false
+    end
+
+    local response, err = http.post(url, payload, self:get_headers())
+    if not response then
+        if callback then callback(false, tostring(err)) end
+        return false
+    end
+
+    local code = response.code or response.status or 0
+    local body = response.body or ""
+    if code >= 200 and code < 300 then
+        local ok, data = pcall(json.decode, body)
+        if ok and data then
+            if callback then callback(true, data) end
+            return true, data
+        end
+        if callback then callback(true) end
+        return true
+    end
+
+    if callback then callback(false, "HTTP " .. tostring(code)) end
+    return false
+end
+
+function FolioAPI:get_book_statistics(book_id, callback)
+    local base_url = self:get_server_url()
+    local url = base_url .. "/books/" .. tostring(book_id) .. "/statistics"
+
+    local http = get_http_client()
+    if not http then
+        if callback then callback(false, "HTTP client unavailable") end
+        return false
+    end
+
+    local response, err = http.get(url, self:get_headers())
+    if not response then
+        if callback then callback(false, tostring(err)) end
+        return false
+    end
+
+    local code = response.code or response.status or 0
+    local body = response.body or ""
+    if code >= 200 and code < 300 then
+        local ok, data = pcall(json.decode, body)
+        if ok and data then
+            if callback then callback(true, data) end
+            return true, data
+        end
+    end
+
+    if callback then callback(false, "HTTP " .. tostring(code)) end
+    return false
+end
+
 function FolioAPI:list_annotations(book_id, since_or_cb, maybe_callback)
     local since
     local callback

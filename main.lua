@@ -102,6 +102,12 @@ function FolioSync:onReaderReady()
     self._jump_pending_percent = nil
     self._consecutive_jump_pages = nil
 
+    self._session_start_time = os.time()
+    self._session_last_active = os.time()
+    self._session_active_duration = 0
+    self._session_pages_count = 0
+    self._session_start_percent = nil
+
     if self.settings.auto_progress_sync then
         self._is_pulling_on_open = true
         self._last_progress_sync_time = os.time() + 5
@@ -130,6 +136,7 @@ function FolioSync:pull_and_sync_all(target_ui)
             local active_ui = self:get_ui()
             if active_ui and active_ui.document then
                 self.manager:sync_annotations_and_bookmarks(active_ui, active_ui.document, false)
+                self.manager:sync_reading_sessions(active_ui, active_ui.document)
             end
         end
     end)
@@ -230,22 +237,80 @@ function FolioSync:onPageUpdate(_page_number)
         self._last_progress_sync_time = now
         self.manager:sync_progress(ui, ui.document, true)
     end
+
+    -- Track active reading session duration
+    if self._session_last_active then
+        local diff = now - self._session_last_active
+        -- If less than 3 minutes (180s) between page turns, count as active reading
+        if diff > 0 and diff < 180 then
+            self._session_active_duration = (self._session_active_duration or 0) + diff
+        end
+    end
+    self._session_last_active = now
+    self._session_pages_count = (self._session_pages_count or 0) + 1
+    if not self._session_start_percent and percent then
+        self._session_start_percent = percent
+    end
+end
+
+function FolioSync:_finalize_and_record_session(ui, document)
+    local target_ui = ui or self:get_ui()
+    local doc = document or (target_ui and target_ui.document)
+    if not (target_ui and doc) then return end
+
+    local now = os.time()
+    local duration = math.floor(self._session_active_duration or 0)
+    local start_time = self._session_start_time
+
+    if start_time and duration >= 10 then
+        local info = self.manager and self.manager.get_doc_info and self.manager:get_doc_info(target_ui, doc)
+        local end_percent = info and info.percent or self._session_start_percent or 0
+
+        local session_data = {
+            client_session_id = utils.generate_uuid(),
+            device_name = "KOReader",
+            start_time = utils.iso8601(start_time),
+            end_time = utils.iso8601(now),
+            duration_seconds = duration,
+            start_progress = self._session_start_percent or 0,
+            end_progress = end_percent,
+            pages_read = self._session_pages_count or 0,
+        }
+
+        self.manager:record_reading_session(target_ui, doc, session_data)
+    end
+
+    -- Reset session tracker for next batch / session
+    self._session_start_time = now
+    self._session_last_active = now
+    self._session_active_duration = 0
+    self._session_pages_count = 0
+    local info = self.manager and self.manager.get_doc_info and self.manager:get_doc_info(target_ui, doc)
+    self._session_start_percent = info and info.percent or 0
 end
 
 function FolioSync:onCloseDocument()
     local ui = self:get_ui()
-    if self.settings.auto_progress_sync and ui and ui.document then
-        if not self._jump_pending_since then
-            self.manager:sync_progress(ui, ui.document, true)
+    if ui and ui.document then
+        self:_finalize_and_record_session(ui, ui.document)
+        if self.settings.auto_progress_sync then
+            if not self._jump_pending_since then
+                self.manager:sync_progress(ui, ui.document, true)
+            end
+            self.manager:sync_reading_sessions(ui, ui.document)
         end
     end
 end
 
 function FolioSync:onSuspend()
     local ui = self:get_ui()
-    if self.settings.auto_progress_sync and ui and ui.document then
-        if not self._jump_pending_since then
-            self.manager:sync_progress(ui, ui.document, true)
+    if ui and ui.document then
+        self:_finalize_and_record_session(ui, ui.document)
+        if self.settings.auto_progress_sync then
+            if not self._jump_pending_since then
+                self.manager:sync_progress(ui, ui.document, true)
+            end
+            self.manager:sync_reading_sessions(ui, ui.document)
         end
     end
 end
