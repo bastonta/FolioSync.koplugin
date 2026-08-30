@@ -140,5 +140,21 @@ function M.url_encode(str)
     return str
 end
 
+function M.get_parent_dir(path)
+    if not path or path == "" then return nil end
+    local clean = path:gsub("[/\\]+$", "")
+    if clean == "" then
+        return "/"
+    end
+    local parent = clean:match("^(.*)[/\\][^/\\]+$")
+    if parent and parent ~= "" then
+        return parent
+    end
+    if clean:sub(1, 1) == "/" then
+        return "/"
+    end
+    return clean
+end
+
 return M
 

@@ -1142,8 +1142,57 @@ function Manager:push_all_data(ui, document, force_manual)
     end)
 end
 
+-- Log XPointer navigation errors to a file located above the selected download directory
+function Manager:log_xpointer_error(book_title, remote_pos, details, doc_path, candidates, remote_percent)
+    local chosen_dir = (self.plugin and self.plugin.settings and self.plugin.settings.download_dir)
+        or (doc_path and doc_path:match("^(.*)[/\\]"))
+        or "/sdcard/books/FolioSync"
+    local target_dir = utils.get_parent_dir(chosen_dir) or chosen_dir
+    utils.ensure_dir(target_dir)
+
+    local log_file_path = target_dir .. "/xpointer_errors.txt"
+    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+
+    local lines = {}
+    table.insert(lines, "========================================")
+    table.insert(lines, string.format("[%s] XPointer Navigation Error", timestamp))
+    if book_title and book_title ~= "" then
+        table.insert(lines, string.format("Book Title: %s", tostring(book_title)))
+    end
+    if doc_path and doc_path ~= "" then
+        table.insert(lines, string.format("File Path: %s", tostring(doc_path)))
+    end
+    table.insert(lines, string.format("Received Location: %s", tostring(remote_pos)))
+    if remote_percent then
+        table.insert(lines, string.format("Received Progress: %s%%", tostring(remote_percent)))
+    end
+    if details and details ~= "" then
+        table.insert(lines, string.format("Details: %s", tostring(details)))
+    end
+    if candidates and #candidates > 0 then
+        table.insert(lines, "Candidate XPointers tried:")
+        for _, c in ipairs(candidates) do
+            table.insert(lines, string.format("  - %s", tostring(c)))
+        end
+    end
+    table.insert(lines, "========================================\n")
+
+    local content = table.concat(lines, "\n")
+
+    local f = io.open(log_file_path, "a")
+    if f then
+        f:write(content)
+        f:close()
+    else
+        logger.warn("FolioSync Manager: failed to open log file " .. tostring(log_file_path))
+    end
+
+    logger.warn(string.format("FolioSync Manager: XPointer navigation error for '%s': %s (logged to %s)",
+        tostring(book_title or "unknown"), tostring(remote_pos), tostring(log_file_path)))
+end
+
 -- Navigate reader UI to position/page specified by location or percentage
-function Manager:goto_location(target_ui, remote_pos, remote_percent, total_pages, target_doc)
+function Manager:goto_location(target_ui, remote_pos, remote_percent, total_pages, target_doc, book_title, book_info)
     local UIMgr = require("ui/uimanager")
 
     -- 1. Robust UI Resolution: find an active ReaderUI instance with document and handleEvent
@@ -1174,10 +1223,26 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
 
     local doc = target_doc or ui.document
 
+    -- Resolve title and file path for logging if not provided
+    local title = book_title
+    local doc_file_path = nil
+    if type(book_info) == "table" then
+        title = title or book_info.title
+        doc_file_path = book_info.file or book_info.file_path
+    end
+    if not title or not doc_file_path then
+        local info = self:get_doc_info(ui, doc)
+        if info then
+            title = title or info.title
+            doc_file_path = doc_file_path or info.file or info.file_path
+        end
+    end
+
     -- 2. If remote_pos is an XPointer string (starts with '/' or contains 'DocFragment' / 'text()')
     if type(remote_pos) == "string" and remote_pos ~= "" and not remote_pos:match("^page_%d+$") then
         local target_page = nil
         local best_xp = nil
+        local last_err = nil
 
         -- Generate candidate XPointers from most specific to least specific
         local candidates = {}
@@ -1222,6 +1287,8 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
                     target_page = tonumber(p)
                     best_xp = xp
                     break
+                elseif not ok and p then
+                    last_err = tostring(p)
                 end
             end
         end
@@ -1233,6 +1300,8 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
             local curr_page_after = doc and doc.getCurrentPage and doc:getCurrentPage()
             if ok and (res == nil or res == true) and (not target_page or curr_page_after == target_page or (curr_page_before and curr_page_after ~= curr_page_before)) then
                 return true
+            elseif not ok and res then
+                last_err = tostring(res)
             end
         end
 
@@ -1245,14 +1314,24 @@ function Manager:goto_location(target_ui, remote_pos, remote_percent, total_page
             end)
             if ok_event and res_event then
                 return true
+            elseif not ok_event and res_event then
+                last_err = tostring(res_event)
             end
         end
 
         -- Method C: Direct page jump via validated target_page
         if target_page and target_page > 0 then
-            ui:handleEvent(Event:new("GotoPage", target_page))
-            return true
+            local ok_page = pcall(function()
+                return ui:handleEvent(Event:new("GotoPage", target_page))
+            end)
+            if ok_page then
+                return true
+            end
         end
+
+        -- If XPointer navigation failed, log the error to file above download directory
+        local reason = last_err or "XPointer could not be resolved to any page in document DOM"
+        self:log_xpointer_error(title, remote_pos, reason, doc_file_path, candidates, remote_percent)
     end
 
     -- 3. Check if remote_pos is a page_N string (e.g. "page_15")
@@ -1325,7 +1404,7 @@ function Manager:pull_progress(ui, document, force_manual, callback)
                 local target_doc = info.document or (target_ui and target_ui.document) or document
 
                 if (remote_pos and remote_pos ~= "") or (remote_percent and remote_percent > 0) then
-                    self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc)
+                    self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc, info.title, info)
                 end
 
                 if remote_is_read == true then

@@ -1134,3 +1134,147 @@ describe("FolioSync Footnote, Bookmark and Link Navigation Guards (Option 4)", f
     end)
 end)
 
+describe("FolioSync Parent Directory & XPointer Error Logging", function()
+    local temp_dir = os.getenv("TEMP") or os.getenv("TMP") or "/tmp"
+    temp_dir = temp_dir:gsub("\\", "/")
+    local download_dir = temp_dir .. "/FolioSyncTests"
+    local expected_parent_dir = temp_dir
+
+    it("correctly extracts parent directory with utils.get_parent_dir", function()
+        assert.is_equal("/sdcard/books", utils.get_parent_dir("/sdcard/books/FolioSync"))
+        assert.is_equal("/sdcard/books", utils.get_parent_dir("/sdcard/books/FolioSync/"))
+        assert.is_equal("C:/books", utils.get_parent_dir("C:/books/FolioSync"))
+        assert.is_equal("/sdcard", utils.get_parent_dir("/sdcard/books"))
+        assert.is_equal("/", utils.get_parent_dir("/books"))
+        assert.is_equal("/", utils.get_parent_dir("/"))
+        assert.is_nil(utils.get_parent_dir(nil))
+        assert.is_nil(utils.get_parent_dir(""))
+    end)
+
+    it("logs XPointer navigation error to a file above the download directory", function()
+        local Manager = require("manager")
+        local fake_plugin = {
+            settings = { download_dir = download_dir },
+        }
+        local mgr = Manager:new(fake_plugin)
+
+        local log_file = expected_parent_dir .. "/xpointer_errors.txt"
+        os.remove(log_file)
+
+        mgr:log_xpointer_error(
+            "The Count of Monte Cristo",
+            "/body/DocFragment[5]/body/div[2]/p[14]/text().0",
+            "Could not resolve in document DOM",
+            download_dir .. "/The Count of Monte Cristo.epub",
+            {
+                "/body/DocFragment[5]/body/div[2]/p[14]/text().0",
+                "/body/DocFragment[5]/body/div[2]/p[14]",
+                "/body/DocFragment[5]/body/div[2]/p[14].0",
+            },
+            34.5
+        )
+
+        local f = io.open(log_file, "r")
+        assert.is_not_nil(f)
+        local content = f:read("*a")
+        f:close()
+
+        assert.is_truthy(content:find("XPointer Navigation Error"))
+        assert.is_truthy(content:find("Book Title: The Count of Monte Cristo"))
+        assert.is_truthy(content:find("Received Location: /body/DocFragment%[5%]/body/div%[2%]/p%[14%]/text%(%)%.0"))
+        assert.is_truthy(content:find("Received Progress: 34.5%%"))
+        assert.is_truthy(content:find("Details: Could not resolve in document DOM"))
+        assert.is_truthy(content:find("/body/DocFragment%[5%]/body/div%[2%]/p%[14%]"))
+
+        os.remove(log_file)
+    end)
+
+    it("writes error log and falls back when goto_location fails on invalid XPointer", function()
+        local Manager = require("manager")
+        local fake_plugin = {
+            settings = { download_dir = download_dir },
+        }
+        local mgr = Manager:new(fake_plugin)
+
+        local log_file = expected_parent_dir .. "/xpointer_errors.txt"
+        os.remove(log_file)
+
+        local jumped_page = nil
+        local fake_ui = {
+            document = {
+                getPageFromXPointer = function(self, xp)
+                    return nil -- Fails DOM resolution
+                end,
+            },
+            handleEvent = function(self, evt)
+                if evt.name == "GotoPage" then
+                    jumped_page = evt.arg
+                    return true
+                end
+            end,
+        }
+
+        local bad_xpointer = "/body/DocFragment[99]/body/div[99]/p[99]/text().0"
+        local book_info = {
+            title = "Brave New World",
+            file_path = download_dir .. "/Brave New World.epub",
+        }
+
+        -- Call goto_location with bad XPointer and 50% fallback on 200 total pages
+        local res = mgr:goto_location(fake_ui, bad_xpointer, 50, 200, fake_ui.document, "Brave New World", book_info)
+
+        -- Should fall back to percentage navigation (page 100)
+        assert.is_true(res)
+        assert.is_equal(100, jumped_page)
+
+        -- Verify error log was written
+        local f = io.open(log_file, "r")
+        assert.is_not_nil(f)
+        local content = f:read("*a")
+        f:close()
+
+        assert.is_truthy(content:find("Book Title: Brave New World"))
+        assert.is_truthy(content:find("Received Location: /body/DocFragment%[99%]"))
+        assert.is_truthy(content:find("Received Progress: 50%%"))
+
+        os.remove(log_file)
+    end)
+
+    it("does NOT log error when goto_location succeeds on valid XPointer", function()
+        local Manager = require("manager")
+        local fake_plugin = {
+            settings = { download_dir = download_dir },
+        }
+        local mgr = Manager:new(fake_plugin)
+
+        local log_file = expected_parent_dir .. "/xpointer_errors.txt"
+        os.remove(log_file)
+
+        local jumped_pos = nil
+        local fake_ui = {
+            document = {
+                getPageFromXPointer = function(self, xp)
+                    return 42
+                end,
+            },
+            handleEvent = function(self, evt)
+                if evt.name == "GotoPos" then
+                    jumped_pos = evt.arg
+                    return true
+                end
+            end,
+        }
+
+        local valid_xpointer = "/body/DocFragment[3]/body/div[1]/p[5]/text().0"
+        local res = mgr:goto_location(fake_ui, valid_xpointer, 25, 200, fake_ui.document, "Valid Book")
+
+        assert.is_true(res)
+        assert.is_equal(valid_xpointer, jumped_pos)
+
+        -- Verify log file was NOT created
+        local f = io.open(log_file, "r")
+        assert.is_nil(f)
+    end)
+end)
+
+
