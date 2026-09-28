@@ -147,7 +147,9 @@ function Menus:get_settings_sub_menu()
         },
         {
             text_func = function()
-                return T(_("Version: %1 (Tap to check updates)"), version)
+                local is_debug = (version == "dev" or version:find("dev") or version:find("debug"))
+                local display_version = is_debug and (version .. " (Debug)") or version
+                return T(_("Version: %1 (Tap to check updates)"), display_version)
             end,
             callback = function()
                 self.plugin:checkForUpdates()

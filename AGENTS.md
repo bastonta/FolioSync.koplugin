@@ -119,4 +119,6 @@ When developing or modifying code in this repository:
 4. **Preserve Comments & Docstrings**: Maintain existing function documentation and inline comments.
 5. **Git Commit Style**: Use Conventional Commits with clear scopes:
    - `feat(browser): ...`, `fix(sync): ...`, `feat(manager): ...`, `fix(api): ...`, `chore(release): ...`.
-6. **Releases & Versioning**: Update `CHANGELOG.md` following Keep a Changelog and use the `.agents/skills/changelog-release-tag` skill when bumping versions and tagging (`vX.Y.Z`).
+6. **Releases & Versioning**: Update `CHANGELOG.md` following Keep a Changelog and use the `.agents/skills/release` skill when preparing releases and tagging (`vX.Y.Z`).
+   - Follow **Variant 1 (Clean Release without `-dev` in Git)**: commit `CHANGELOG.md`, tag the release commit, and package release archives using `make release VERSION=vX.Y.Z`.
+   - In source checkouts, `_version.lua` returns `"dev"` and UI indicates `Version: dev (Debug)`. Release packages have the clean version baked in by the Makefile without mutating git history.
