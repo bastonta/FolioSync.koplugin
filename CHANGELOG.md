@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Support for the Folio server book kinds (`File` | `Chapters`): `browse` and `list_books` request `kind=File`, so books assembled from chapters (which have no EPUB file) are not offered for download; `FolioAPI.is_chapters_book` helper.
+- Clear error message when `/books/{id}/download` answers `409 Conflict` for a `Chapters` book, and the browser hides download actions for such items.
+- Unit tests for book kind detection, catalog query parameters, 409 handling and browser menu behaviour.
+
+### Fixed
+- `list_books` now paginates with `offset`/`limit` as the server expects instead of an ignored `page` parameter.
+
 ## [0.4.0] - 2026-08-30
 
 ### Added

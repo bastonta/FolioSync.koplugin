@@ -6,6 +6,7 @@ local InputDialog = require("ui/widget/inputdialog")
 local Menu = require("ui/widget/menu")
 local T = require("ffi/util").template
 local utils = require("utils")
+local FolioAPI = require("folio_api")
 
 local FolioBrowser = Menu:extend {
     current_series_id = nil,
@@ -123,6 +124,10 @@ function FolioBrowser:fetch_items(append)
             else
                 local is_read = item.progress and (item.progress.isRead or item.progress.is_read)
                 local prefix = is_read and "✅ " or "📖 "
+                if FolioAPI.is_chapters_book(item) then
+                    -- Should not happen (browse asks for kind=File), but mark it visibly
+                    prefix = "📝 "
+                end
                 local author = item.author or ""
                 local display_text = (author ~= "") and string.format("%s%s - %s", prefix, name, author) or
                     string.format("%s%s", prefix, name)
@@ -512,22 +517,29 @@ function FolioBrowser:on_book_selected(book)
     local book_title = book.name or book.title or "book"
     local default_dir = self.plugin.settings.download_dir
     local is_read = book.progress and (book.progress.isRead or book.progress.is_read)
+    local has_file = not FolioAPI.is_chapters_book(book)
 
     local menu
-    local item_table = {
-        {
+    local item_table = {}
+    if has_file then
+        table.insert(item_table, {
             text = T(_("📥 Download to default folder (%1)"), default_dir),
             callback = function()
                 self:start_download(book, default_dir)
             end,
-        },
-        {
+        })
+        table.insert(item_table, {
             text = _("📁 Choose custom download folder..."),
             callback = function()
                 self:prompt_custom_download_dir(book, default_dir)
             end,
-        },
-    }
+        })
+    else
+        table.insert(item_table, {
+            text = _("📝 Assembled from chapters — no EPUB file to download"),
+            enabled = false,
+        })
+    end
 
     if is_read then
         table.insert(item_table, {
@@ -627,6 +639,13 @@ function FolioBrowser:prompt_custom_download_dir(book, current_dir)
 end
 
 function FolioBrowser:start_download(book, download_dir)
+    if FolioAPI.is_chapters_book(book) then
+        UIManager:show(InfoMessage:new {
+            text = _("This book is assembled from chapters on the server and has no EPUB file. Read it in the Folio web client or compile it to EPUB there first."),
+            timeout = 5,
+        })
+        return
+    end
     local book_title = book.name or book.title or "book"
     local clean_title = utils.sanitize_filename(book_title)
     local clean_author = utils.sanitize_filename(book.author or "")

@@ -171,6 +171,18 @@ msgstr "📥 Загрузить в папку по умолчанию (%1)"
 msgid "📁 Choose custom download folder..."
 msgstr "📁 Выбрать другую папку для загрузки…"
 
+#: browser.lua
+msgid "📝 Assembled from chapters — no EPUB file to download"
+msgstr "📝 Собрана из глав — нет EPUB-файла для загрузки"
+
+#: browser.lua
+msgid ""
+"This book is assembled from chapters on the server and has no EPUB file. "
+"Read it in the Folio web client or compile it to EPUB there first."
+msgstr ""
+"Эта книга собрана из глав на сервере и не имеет EPUB-файла. Читайте её в "
+"веб-клиенте Folio или сначала соберите там в EPUB."
+
 #: browser.lua:534
 msgid "✗ Mark as Unread on Folio"
 msgstr "✗ Пометить как непрочитанную на Folio"

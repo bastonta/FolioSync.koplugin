@@ -4,6 +4,18 @@ local utils = require("utils")
 
 local FolioAPI = {}
 
+-- FolioSync only handles complete e-book files. Folio also stores books assembled
+-- from chapters (kind = "Chapters") that have no downloadable file: catalog
+-- requests ask the server for kind = "File" only.
+FolioAPI.BOOK_KIND_FILE = "File"
+FolioAPI.BOOK_KIND_CHAPTERS = "Chapters"
+
+-- Returns true when the book item (browse / list / detail response) has no
+-- downloadable file. Items from older servers carry no `kind` and are files.
+function FolioAPI.is_chapters_book(book)
+    return type(book) == "table" and book.kind == FolioAPI.BOOK_KIND_CHAPTERS
+end
+
 local function urlencode(str)
     if not str then return "" end
     str = string.gsub(str, "\r?\n", "\r\n")
@@ -213,6 +225,7 @@ function FolioAPI:browse(series_id, sort_by, offset, limit, search, search_by, c
     if search_by and search_by ~= "" then
         query = query .. "&searchBy=" .. urlencode(search_by)
     end
+    query = query .. "&kind=" .. FolioAPI.BOOK_KIND_FILE
 
     local url = base_url .. "/browse?" .. query
     local http = get_http_client()
@@ -248,7 +261,9 @@ function FolioAPI:list_books(page, limit, search, callback)
     page = page or 1
     limit = limit or 20
 
-    local query = string.format("page=%d&limit=%d", page, limit)
+    -- The server paginates with offset/limit; `page` is 1-based here.
+    local offset = math.max(0, (page - 1) * limit)
+    local query = string.format("offset=%d&limit=%d&kind=%s", offset, limit, FolioAPI.BOOK_KIND_FILE)
     if search and search ~= "" then
         query = query .. "&search=" .. urlencode(search)
     end
@@ -381,6 +396,11 @@ function FolioAPI:download_book(book_id, save_path, callback)
         f:close()
         if callback then callback(true, save_path) end
         return true, save_path
+    elseif code == 409 then
+        -- Book assembled from chapters: the server has no file for it
+        local msg = "This book is assembled from chapters on the server and has no EPUB file"
+        if callback then callback(false, msg) end
+        return false, msg
     else
         local msg = "Download failed (HTTP " .. tostring(code) .. ")"
         if callback then callback(false, msg) end

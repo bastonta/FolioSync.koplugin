@@ -1577,8 +1577,93 @@ describe("FolioSync Reading Statistics & Sessions Synchronization", function()
         -- (58.05 - 57.14)/100 * 200 = 0.91 * 2 = 1.82 -> rounded = 2 pages
         assert.is_equal(2, recorded_session.pages_read)
     end)
+describe("FolioSync Book Kinds (File vs Chapters)", function()
+    local function install_http(handler)
+        package.loaded["socket.http"] = { request = handler }
+        package.loaded["ltn12"] = package.loaded["ltn12"] or {
+            source = { string = function(str) return function() local r = str; str = nil; return r end end },
+            sink = { table = function(t) return function(chunk) if chunk then table.insert(t, chunk) end return 1 end end },
+        }
+        package.loaded["folio_api"] = nil
+        return require("folio_api")
+    end
+
+    it("detects books assembled from chapters and treats legacy items as files", function()
+        local FolioAPI = install_http(function() return "{}", 200, {} end)
+        assert.is_true(FolioAPI.is_chapters_book({ id = "b1", kind = "Chapters" }))
+        assert.is_false(FolioAPI.is_chapters_book({ id = "b2", kind = "File" }))
+        assert.is_false(FolioAPI.is_chapters_book({ id = "b3" }))
+        assert.is_false(FolioAPI.is_chapters_book(nil))
+    end)
+
+    it("asks the server for File books only when browsing and listing", function()
+        local requested_urls = {}
+        local FolioAPI = install_http(function(req)
+            table.insert(requested_urls, req.url)
+            return '{"items":[],"total":0}', 200, {}
+        end)
+        local api = FolioAPI:new({ server_url = "http://localhost:8080", api_key = "key123" })
+
+        api:browse(nil, "name", 0, 15)
+        assert.is_truthy(requested_urls[1]:find("/browse?", 1, true))
+        assert.is_truthy(requested_urls[1]:find("kind=File", 1, true))
+
+        -- list_books paginates with offset/limit on the server side
+        api:list_books(3, 10, "Dune")
+        assert.is_truthy(requested_urls[2]:find("/books?", 1, true))
+        assert.is_truthy(requested_urls[2]:find("offset=20", 1, true))
+        assert.is_truthy(requested_urls[2]:find("limit=10", 1, true))
+        assert.is_truthy(requested_urls[2]:find("kind=File", 1, true))
+        assert.is_truthy(requested_urls[2]:find("search=Dune", 1, true))
+        assert.is_nil(requested_urls[2]:find("page=", 1, true))
+    end)
+
+    it("reports a clear error when download answers 409 for a Chapters book", function()
+        local FolioAPI = install_http(function()
+            return '{"title":"Conflict"}', 409, {}
+        end)
+        local api = FolioAPI:new({ server_url = "http://localhost:8080", api_key = "key123" })
+
+        local tmp = os.tmpname()
+        local ok, msg = api:download_book("chapters-book", tmp)
+        os.remove(tmp)
+        assert.is_false(ok)
+        assert.is_truthy(tostring(msg):find("assembled from chapters", 1, true))
+    end)
+
+    it("browser hides download actions for Chapters books", function()
+        local FolioAPI = install_http(function() return "{}", 200, {} end)
+        local shown = {}
+        package.loaded["ui/uimanager"].show = function(self, widget)
+            table.insert(shown, widget)
+        end
+        package.loaded["browser"] = nil
+        local FolioBrowser = require("browser")
+        local browser = setmetatable({
+            api = FolioAPI:new({ server_url = "http://localhost:8080", api_key = "key123" }),
+            plugin = { settings = { download_dir = "/mnt/books" } },
+            paths = {},
+        }, { __index = FolioBrowser })
+
+        browser:on_book_selected({ id = "c1", name = "Chapters Book", kind = "Chapters" })
+        local menu = shown[#shown]
+        assert.is_not_nil(menu)
+        for _, entry in ipairs(menu.item_table) do
+            assert.is_nil(tostring(entry.text):find("Download to default folder", 1, true))
+            assert.is_nil(tostring(entry.text):find("Choose custom download folder", 1, true))
+        end
+
+        shown = {}
+        browser:on_book_selected({ id = "f1", name = "File Book", kind = "File" })
+        menu = shown[#shown]
+        assert.is_truthy(tostring(menu.item_table[1].text):find("Download to default folder", 1, true))
+
+        -- start_download refuses Chapters books before any network call
+        shown = {}
+        browser:start_download({ id = "c1", name = "Chapters Book", kind = "Chapters" }, "/mnt/books")
+        assert.is_equal(1, #shown)
+        assert.is_truthy(tostring(shown[1].text):find("no EPUB file", 1, true))
+    end)
 end)
 
-
-
-
+end)

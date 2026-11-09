@@ -168,6 +168,16 @@ msgstr ""
 msgid "📁 Choose custom download folder..."
 msgstr ""
 
+#: browser.lua
+msgid "📝 Assembled from chapters — no EPUB file to download"
+msgstr ""
+
+#: browser.lua
+msgid ""
+"This book is assembled from chapters on the server and has no EPUB file. "
+"Read it in the Folio web client or compile it to EPUB there first."
+msgstr ""
+
 #: browser.lua:534
 msgid "✗ Mark as Unread on Folio"
 msgstr ""
