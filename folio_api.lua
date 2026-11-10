@@ -458,9 +458,22 @@ end
 
 -- One page of the chapter list of a Chapters book (summaries without content),
 -- in reading order: { items = {...}, more = bool, total = n }.
-function FolioAPI:list_chapters(book_id, offset, limit)
-    return self:get_json(string.format("/books/%s/chapters?offset=%d&limit=%d",
-        tostring(book_id), offset or 0, limit or 100))
+-- `volume` (optional) restricts the list to one volume; servers older than the volumes
+-- feature ignore it, so callers filter the items again.
+function FolioAPI:list_chapters(book_id, offset, limit, volume)
+    local path = string.format("/books/%s/chapters?offset=%d&limit=%d",
+        tostring(book_id), offset or 0, limit or 100)
+    if tonumber(volume) then
+        path = path .. "&volume=" .. string.format("%.7g", tonumber(volume))
+    end
+    return self:get_json(path)
+end
+
+-- Volumes of a Chapters book, in reading order:
+-- { items = { { volume = n, chaptersCount = n, ... } }, chaptersTotal = n }.
+-- Servers older than the volumes feature answer 403 (API key allow-list) or 404.
+function FolioAPI:list_volumes(book_id)
+    return self:get_json(string.format("/books/%s/volumes", tostring(book_id)))
 end
 
 -- A chapter with its content paragraphs.

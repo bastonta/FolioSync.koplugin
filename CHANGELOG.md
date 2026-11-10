@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reading books that have no EPUB file yet** (Folio `Chapters` kind): the library browser lists them (`📝`) and downloads them chapter by chapter, assembling a local EPUB with illustrations, cover and a table of contents (`chapters_book.lua`, `chapters_epub.lua`). Downloading a book that is already on the device updates it: only new and changed chapters are fetched, the rest is copied from the previous build. Progress is shown while downloading and the download can be cancelled.
 - **📥 Update Book Chapters from Folio** in the document menu updates the open book and reopens it.
 - Reading progress of such books is exchanged with the server as a chapter reference (`ch:<chapterId>`, the form the Folio web reader uses): pushing sends the current chapter, pulling opens the chapter read elsewhere and keeps the precise local position when it is the same chapter. When chapters are inserted or reordered on the server, the stored position, annotations and bookmarks follow their chapters.
+- **Downloading by volume**: a `Chapters` book with several volumes can be downloaded as the whole book or one volume at a time. The browser lists the volumes with their chapter counts and marks the copies already on the device; every volume is a file of its own (`<Title> - <Author> - Vol 03.epub`, titled `<Title> — Volume 3`, with the book as its series) that is updated independently, also through **📥 Update Book Chapters from Folio**.
+- A volume copy syncs as a part of the book: the reading position is still the chapter (`ch:<chapterId>`), percentages and reading statistics are sent in whole-book scale, bookmarks and annotations are translated to and from whole-book positions (those of other volumes are left alone), and finishing a volume does not mark the book as read unless it is the last one.
 - Assembled books are linked to their server book without hashing (`<book>.sdr/folio_chapters.json`, with the manifest inside the EPUB as a fallback).
-- `FolioAPI.is_chapters_book` helper and API methods `list_chapters`, `get_chapter`, `get_book_image`, `get_book_cover`.
+- `FolioAPI.is_chapters_book` helper and API methods `list_chapters` (optionally of one volume), `list_volumes`, `get_chapter`, `get_book_image`, `get_book_cover`.
 - Clear error message when `/books/{id}/download` answers `409 Conflict` for a `Chapters` book.
 - Unit tests for the EPUB builder, incremental updates, position translation, book kind detection and catalog query parameters.
 
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `list_books` (title fallback for matching local files) requests `kind=File`; `browse` lists books of every kind.
 - Annotations and bookmarks are matched to their server items by id as well as by position.
 - Requires a Folio server that lets API keys read chapters (`GET /books/{id}/chapters`); older servers answer `403` and the plugin says so.
+- Downloading by volume needs a Folio server with `GET /books/{id}/volumes`; with an older server only the whole book is offered.
 
 ### Fixed
 - `list_books` now paginates with `offset`/`limit` as the server expects instead of an ignored `page` parameter.

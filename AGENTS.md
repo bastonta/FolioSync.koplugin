@@ -18,7 +18,7 @@ FolioSync.koplugin/
 ├── manager.lua               # Document lifecycle coordinator: onDocumentOpen, onDocumentClose, sync triggers
 ├── folio_api.lua             # HTTP REST API client: X-API-Key auth, books, progress, annotations, stats
 ├── browser.lua               # Remote library browser UI: series tree, search, sorting, downloader
-├── chapters_book.lua         # Chapters books: chapter-by-chapter download/update, chapter layout, `ch:<id>` position translation
+├── chapters_book.lua         # Chapters books: chapter-by-chapter download/update (whole book or one volume), chapter layout, `ch:<id>` position translation
 ├── chapters_epub.lua         # EPUB 3 builder for Chapters books (markdown-ish paragraphs → XHTML, nav, OPF, manifest)
 ├── annotations.lua           # Converter between KOReader bookmark/highlight models & Folio REST format
 ├── menus.lua                 # KOReader Tools menu builder (⚙️ Settings, 📚 Browse, 🔄 Sync)
@@ -65,6 +65,7 @@ FolioSync.koplugin/
 - **Updates** rebuild the file into `<book>.epub.tmp`, copying unchanged chapters and illustrations from the previous build (needs `ffi/archiver`, KOReader 2025.04+; older versions download everything again), then rename it over the book. An open book is swapped through `ReaderUI:reloadDocument`.
 - **Matching**: such a file exists nowhere on the server, so it is linked by `<book>.sdr/folio_chapters.json` (book id, chapter order, file size) or by the manifest inside the EPUB, never by hash.
 - **Reading position**: the server keeps it as `ch:<chapterId>` (no XPointer conversion). `DocFragment[N]` of a local XPointer is the N-th chapter: pushes send the chapter, pulls open the chapter start unless the reader is already in that chapter. When chapters move, `last_xpointer`, annotations and the sync snapshot are remapped.
+- **Volumes**: a book with several volumes can also be downloaded one volume per file (`GET /books/{id}/volumes`, `GET /books/{id}/chapters?volume=N`; `<stem> - Vol NN.epub`, title `<title> — Volume N`, `dc:identifier` `urn:folio:<bookId>:volume:<n>`, the book as `calibre:series` / `belongs-to-collection`). The manifest and the sidecar layout of such a copy carry `volume`, `chaptersBefore` and `bookChapters` (`chapters_before` / `book_chapters` in the sidecar); a file is a copy of (book, volume) only when both match, and copies never overwrite each other. The server counts everything in the whole book, so for a volume copy percentages and session progress are converted (`to_book_percent`), `DocFragment[i]` of bookmarks and annotations is shifted by `chaptersBefore` in both directions (`localize_items` / `globalize_item`; items of other volumes are dropped before the snapshot sync sees them), and the read flag is only sent by the copy that ends the book. Servers without `/volumes` (403 / 404) offer the whole book only. FolioReader follows the same conventions.
 - Long downloads run under `Trapper` (progress messages, tap to pause / cancel); progress updates are throttled because each one costs an e-ink refresh.
 
 ### D. E-Ink Device Constraints & Defensive Programming

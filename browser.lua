@@ -8,6 +8,7 @@ local T = require("ffi/util").template
 local utils = require("utils")
 local FolioAPI = require("folio_api")
 local ChaptersBook = require("chapters_book")
+local ChaptersEpub = require("chapters_epub")
 
 local FolioBrowser = Menu:extend {
     current_series_id = nil,
@@ -635,7 +636,7 @@ end
 
 function FolioBrowser:start_download(book, download_dir)
     if FolioAPI.is_chapters_book(book) then
-        return self:start_chapters_download(book, download_dir)
+        return self:prompt_chapters_scope(book, download_dir)
     end
     local book_title = book.name or book.title or "book"
     local clean_title = utils.sanitize_filename(book_title)
@@ -705,22 +706,90 @@ function FolioBrowser:start_download(book, download_dir)
     UIManager:show(confirm)
 end
 
--- A book that has no EPUB file on the server yet (Chapters kind): it is downloaded chapter
--- by chapter and assembled into a local EPUB. A copy that is already on the device is
--- updated with the new and changed chapters.
-function FolioBrowser:start_chapters_download(book, download_dir)
+-- File name (without extension) and folder of the local copies of a Chapters book.
+function FolioBrowser:chapters_target(book, download_dir)
     local book_title = book.name or book.title or "book"
     local clean_title = utils.sanitize_filename(book_title)
     local clean_author = utils.sanitize_filename(book.author or "")
     local stem = clean_author ~= "" and (clean_title .. " - " .. clean_author) or clean_title
 
     local series_path = self:resolve_series_path(book)
-    local target_dir = utils.build_book_target_dir(download_dir, series_path)
+    return stem, utils.build_book_target_dir(download_dir, series_path)
+end
 
-    local target_path, existing = ChaptersBook.resolve_target(target_dir, stem, book.id)
+--[[--
+A book that has no EPUB file on the server yet (Chapters kind). When it has several
+volumes the user picks what to download: the whole book as one file, or a single volume
+as a file of its own. Copies that are already on the device are marked; picking one
+updates it. A book with one volume — or a server that cannot list volumes — goes
+straight to the whole-book download.
+]]
+function FolioBrowser:prompt_chapters_scope(book, download_dir)
+    local ok, volumes = pcall(ChaptersBook.fetch_volumes, self.api, book.id)
+    if not ok or type(volumes) ~= "table" or #volumes.items < 2 then
+        return self:start_chapters_download(book, download_dir)
+    end
+
+    local stem, target_dir = self:chapters_target(book, download_dir)
+    local function on_device(volume)
+        local ok_target, path, existing = pcall(ChaptersBook.resolve_target, target_dir, stem, book.id, nil, volume)
+        return ok_target and path ~= nil and existing ~= nil
+    end
+
+    local menu
+    local item_table = {
+        {
+            text = T(_("Whole book (%1 chapters)"), volumes.total),
+            mandatory = on_device(nil) and _("on device") or nil,
+            callback = function()
+                UIManager:close(menu)
+                self:start_chapters_download(book, download_dir, nil, stem, target_dir)
+            end,
+        },
+    }
+    for index = 1, #volumes.items do
+        local item = volumes.items[index]
+        table.insert(item_table, {
+            text = T(_("Volume %1 (%2 chapters)"), ChaptersEpub.format_number(item.volume), item.chapters),
+            mandatory = on_device(item.volume) and _("on device") or nil,
+            callback = function()
+                UIManager:close(menu)
+                self:start_chapters_download(book, download_dir, item.volume, stem, target_dir)
+            end,
+        })
+    end
+
+    menu = Menu:new {
+        title = T(_("Download '%1'"), book.name or book.title or _("book")),
+        item_table = item_table,
+        on_close = function()
+            UIManager:close(menu)
+        end,
+    }
+    UIManager:show(menu)
+end
+
+-- Downloads a Chapters book chapter by chapter and assembles it into a local EPUB: the
+-- whole book, or the given volume only. A copy that is already on the device is updated
+-- with the new and changed chapters. `stem` and `target_dir` are passed when the caller
+-- has already worked them out.
+function FolioBrowser:start_chapters_download(book, download_dir, volume, stem, target_dir)
+    local book_title = book.name or book.title or "book"
+    if not (stem and target_dir) then
+        stem, target_dir = self:chapters_target(book, download_dir)
+    end
+
+    local display_title = book_title
+    local file_stem = stem
+    if volume ~= nil then
+        display_title = T(_("%1 — Volume %2"), book_title, ChaptersEpub.format_number(volume))
+        file_stem = stem .. " - " .. ChaptersBook.volume_file_suffix(volume)
+    end
+
+    local target_path, existing = ChaptersBook.resolve_target(target_dir, stem, book.id, nil, volume)
     if not target_path then
         UIManager:show(InfoMessage:new {
-            text = T(_("Another book already uses the file name '%1' in '%2'."), stem .. ".epub", target_dir),
+            text = T(_("Another book already uses the file name '%1' in '%2'."), file_stem .. ".epub", target_dir),
             timeout = 5,
         })
         return
@@ -728,9 +797,9 @@ function FolioBrowser:start_chapters_download(book, download_dir)
 
     local confirm_text
     if existing then
-        confirm_text = T(_("'%1' is already on this device. Update it from Folio?\n\nOnly new and changed chapters are downloaded."), book_title)
+        confirm_text = T(_("'%1' is already on this device. Update it from Folio?\n\nOnly new and changed chapters are downloaded."), display_title)
     else
-        confirm_text = T(_("Download '%1' to '%2'?\n\nThis book has no EPUB file yet: it will be assembled on this device from its chapters."), book_title, target_dir)
+        confirm_text = T(_("Download '%1' to '%2'?\n\nThis book has no EPUB file yet: it will be assembled on this device from its chapters."), display_title, target_dir)
     end
 
     local confirm = ConfirmBox:new {
@@ -740,11 +809,19 @@ function FolioBrowser:start_chapters_download(book, download_dir)
         ok_callback = function()
             utils.ensure_dir(target_dir)
 
-            self.plugin.manager:download_chapters_book(book, target_path, function(success, result, reopened)
+            local request = {
+                id = book.id,
+                name = book.name,
+                title = book.title,
+                author = book.author,
+                volume = volume,
+                display_title = volume ~= nil and display_title or nil,
+            }
+            self.plugin.manager:download_chapters_book(request, target_path, function(success, result, reopened)
                 -- Failures are reported by the manager; a book that was open is open again
                 if not success or reopened then return end
 
-                local summary = self.plugin.manager:chapters_result_text(book_title, result)
+                local summary = self.plugin.manager:chapters_result_text(display_title, result)
                 local open_box = ConfirmBox:new {
                     text = summary .. "\n\n" .. _("Do you want to open it now?"),
                     ok_text = _("Open Book"),

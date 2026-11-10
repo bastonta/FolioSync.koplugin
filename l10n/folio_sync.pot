@@ -769,3 +769,23 @@ msgstr ""
 #: menus.lua
 msgid "📥 Update Book Chapters from Folio"
 msgstr ""
+
+#: browser.lua manager.lua
+msgid "%1 — Volume %2"
+msgstr ""
+
+#: browser.lua
+msgid "Whole book (%1 chapters)"
+msgstr ""
+
+#: browser.lua
+msgid "Volume %1 (%2 chapters)"
+msgstr ""
+
+#: browser.lua
+msgid "on device"
+msgstr ""
+
+#: browser.lua
+msgid "Download '%1'"
+msgstr ""

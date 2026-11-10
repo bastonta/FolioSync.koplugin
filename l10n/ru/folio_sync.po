@@ -793,3 +793,23 @@ msgstr "Эта книга не была собрана из глав Folio."
 #: menus.lua
 msgid "📥 Update Book Chapters from Folio"
 msgstr "📥 Обновить главы книги с Folio"
+
+#: browser.lua manager.lua
+msgid "%1 — Volume %2"
+msgstr "%1 — Том %2"
+
+#: browser.lua
+msgid "Whole book (%1 chapters)"
+msgstr "Вся книга (глав: %1)"
+
+#: browser.lua
+msgid "Volume %1 (%2 chapters)"
+msgstr "Том %1 (глав: %2)"
+
+#: browser.lua
+msgid "on device"
+msgstr "на устройстве"
+
+#: browser.lua
+msgid "Download '%1'"
+msgstr "Загрузить «%1»"

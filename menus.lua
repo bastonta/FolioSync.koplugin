@@ -289,8 +289,17 @@ function Menus:toggle_active_doc_read_status()
             return
         end
 
+        if self.plugin.manager:is_partial_copy(info) then
+            -- One volume of a book that goes on: the status belongs to this file only
+            self.plugin.manager:set_local_read_status(info, target_read, info.docsettings)
+            local msg = target_read and _("Marked as read locally.") or _("Marked as unread locally.")
+            utils.show_msg(msg)
+            return
+        end
+
         local location = self.plugin.manager:outgoing_location(info)
-        self.api:update_progress(book_id, location, info.percent, target_read, function(success)
+        local percent = self.plugin.manager:outgoing_percent(info)
+        self.api:update_progress(book_id, location, percent, target_read, function(success)
             self.plugin.manager:set_local_read_status(info, target_read, info.docsettings)
             if success then
                 local msg = target_read and _("Marked as read on Folio and device.")

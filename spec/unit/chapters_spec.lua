@@ -136,15 +136,43 @@ local function new_fake_api(chapters)
         end
         return false
     end
-    function api:list_chapters(_book_id, offset, limit)
-        local failed, message, code = intercept("list:" .. offset)
+    -- `volume` restricts the list like the server does; `api.ignores_volume` plays a
+    -- server older than the volumes feature, which ignores the parameter.
+    function api:list_chapters(_book_id, offset, limit, volume)
+        local failed, message, code = intercept("list:" .. offset .. (volume and (":v" .. tostring(volume)) or ""))
         if failed then return false, message, code end
+        local source = self.chapters
+        if volume and not self.ignores_volume then
+            source = {}
+            for _, c in ipairs(self.chapters) do
+                if (c.volume or 1) == volume then source[#source + 1] = c end
+            end
+        end
         local items = {}
-        for i = offset + 1, math.min(offset + limit, #self.chapters) do
-            local c = self.chapters[i]
+        for i = offset + 1, math.min(offset + limit, #source) do
+            local c = source[i]
             items[#items + 1] = { id = c.id, volume = c.volume or 1, chapter = c.chapter, name = c.name, updated = c.updated }
         end
-        return true, { items = items, more = offset + limit < #self.chapters, total = #self.chapters }
+        return true, { items = items, more = offset + limit < #source, total = #source }
+    end
+    function api:list_volumes(_book_id)
+        local failed, message, code = intercept("volumes")
+        if failed then return false, message, code end
+        local counts, order = {}, {}
+        for _, c in ipairs(self.chapters) do
+            local v = c.volume or 1
+            if not counts[v] then
+                counts[v] = 0
+                order[#order + 1] = v
+            end
+            counts[v] = counts[v] + 1
+        end
+        table.sort(order)
+        local items = {}
+        for _, v in ipairs(order) do
+            items[#items + 1] = { volume = v, chaptersCount = counts[v] }
+        end
+        return true, { items = items, chaptersTotal = #self.chapters }
     end
     function api:get_chapter(_book_id, chapter_id)
         local failed, message, code = intercept("chapter:" .. chapter_id)
@@ -990,6 +1018,777 @@ describe("Manager with a Chapters book", function()
     end)
 end)
 
+-- ---- Volumes ----
+
+-- A book of three volumes: 2 + 3 + 1 chapters
+local function volumes_book()
+    local function vch(id, volume, number, name, text)
+        local c = chapter(id, number, name, text)
+        c.volume = volume
+        return c
+    end
+    return {
+        vch("v1-a", 1, 1, "One", "v1 a"),
+        vch("v1-b", 1, 2, "Two", "v1 b ![pic](" .. PREFIX .. "one.png)"),
+        vch("v2-a", 2, 3, "Three", "v2 a"),
+        vch("v2-b", 2, 4, "Four", "v2 b ![pic](" .. PREFIX .. "two.png)"),
+        vch("v2-c", 2, 5, "Five", "v2 c"),
+        vch("v3-a", 3, 6, "Six", "v3 a"),
+    }
+end
+
+describe("Chapters book volumes", function()
+    it("builds a copy of one volume that knows its place in the book", function()
+        local dir = tmp_dir()
+        local target = dir .. "/Book - Vol 02.epub"
+        local api = new_fake_api(volumes_book())
+        api.images["one.png"] = PNG
+        api.images["two.png"] = PNG
+
+        local result = assert(build(api, target, { volume = 2 }))
+        assert.is_true(ChaptersBook.commit(result))
+        assert.are.same({ "v2-a", "v2-b", "v2-c" }, result.chapter_ids)
+        assert.are.same({ volume = 2, chapters_before = 2, book_chapters = 6 }, result.scope)
+        assert.is_equal("Server Title — Том 2", result.title)
+        -- Only this volume was asked for and downloaded
+        assert.is_equal(3, api:count("chapter:"))
+        assert.is_equal(0, api:count("chapter:v1"))
+        assert.is_equal(1, api:count("image:"))
+
+        local _, entries = read_fake_archive(target)
+        assert.is_nil(entries["OEBPS/ch-v1-a.xhtml"])
+        assert.is_not_nil(entries["OEBPS/ch-v2-c.xhtml"])
+        assert.is_nil(entries["OEBPS/images/one.png"])
+        assert.is_not_nil(entries["OEBPS/images/two.png"])
+
+        local opf = entries["OEBPS/content.opf"].content
+        assert.is_truthy(opf:find("<dc:title>Server Title — Том 2</dc:title>", 1, true))
+        assert.is_truthy(opf:find('<dc:identifier id="pub-id">urn:folio:' .. BOOK_ID .. ":volume:2</dc:identifier>", 1, true))
+        assert.is_truthy(opf:find('<meta name="calibre:series" content="Server Title"/>', 1, true))
+        assert.is_truthy(opf:find('<meta name="calibre:series_index" content="2"/>', 1, true))
+        assert.is_truthy(opf:find('<meta property="belongs-to-collection" id="series">Server Title</meta>', 1, true))
+        assert.is_truthy(opf:find('<meta refines="#series" property="collection-type">series</meta>', 1, true))
+        assert.is_truthy(opf:find('<meta refines="#series" property="group-position">2</meta>', 1, true))
+
+        -- One volume: a flat table of contents under the volume title
+        local nav = entries["OEBPS/nav.xhtml"].content
+        assert.is_truthy(nav:find("<h1>Server Title — Том 2</h1>", 1, true))
+        assert.is_falsy(nav:find("<ol>\n          <li>", 1, true))
+
+        local manifest = json.decode(entries[ChaptersEpub.MANIFEST_PATH].content)
+        assert.is_equal(1, manifest.version)
+        assert.is_equal(2, manifest.volume)
+        assert.is_equal(2, manifest.chaptersBefore)
+        assert.is_equal(6, manifest.bookChapters)
+        assert.is_equal(3, #manifest.chapters)
+
+        -- The sidecar layout mirrors it, and so does the manifest when the sidecar is gone
+        local layout = ChaptersBook.load_layout(target, read_fake_existing)
+        assert.is_equal(2, layout.volume)
+        assert.is_equal(2, layout.chapters_before)
+        assert.is_equal(6, layout.book_chapters)
+        os.remove(ChaptersBook.layout_path(target))
+        layout = ChaptersBook.load_layout(target, read_fake_existing)
+        assert.are.same({ 2, 2, 6 }, { layout.volume, layout.chapters_before, layout.book_chapters })
+    end)
+
+    it("keeps a whole-book copy free of volume data", function()
+        local dir = tmp_dir()
+        local target = dir .. "/Book.epub"
+        local api = new_fake_api(volumes_book())
+        api.images["one.png"] = PNG
+        api.images["two.png"] = PNG
+        local result = assert(build(api, target))
+        assert.is_true(ChaptersBook.commit(result))
+        assert.is_nil(result.scope)
+        assert.is_equal(0, api:count("volumes"))
+
+        local _, entries = read_fake_archive(target)
+        local opf = entries["OEBPS/content.opf"].content
+        assert.is_truthy(opf:find('<dc:identifier id="pub-id">urn:uuid:' .. BOOK_ID .. "</dc:identifier>", 1, true))
+        assert.is_falsy(opf:find("calibre:series", 1, true))
+        assert.is_falsy(opf:find("belongs-to-collection", 1, true))
+        local manifest = json.decode(entries[ChaptersEpub.MANIFEST_PATH].content)
+        assert.is_nil(manifest.volume)
+        assert.is_nil(manifest.chaptersBefore)
+        assert.is_nil(manifest.bookChapters)
+        local layout = ChaptersBook.load_layout(target, read_fake_existing)
+        assert.is_nil(layout.volume)
+        assert.is_false(ChaptersBook.is_volume_copy(layout))
+    end)
+
+    it("filters the chapter list itself when the server ignores the volume", function()
+        local api = new_fake_api(volumes_book())
+        api.ignores_volume = true
+        local list = assert(ChaptersBook.fetch_chapter_list(api, BOOK_ID, 2))
+        local ids = {}
+        for i, c in ipairs(list) do ids[i] = c.id end
+        assert.are.same({ "v2-a", "v2-b", "v2-c" }, ids)
+        -- and a volume that does not exist is an empty book, not the whole one
+        local dir = tmp_dir()
+        local result, err = build(api, dir .. "/Book - Vol 09.epub", { volume = 9 })
+        assert.is_nil(result)
+        assert.is_equal(ChaptersBook.ERR_NO_CHAPTERS, err)
+    end)
+
+    it("lists volumes and reports servers that cannot", function()
+        local api = new_fake_api(volumes_book())
+        local volumes = assert(ChaptersBook.fetch_volumes(api, BOOK_ID))
+        assert.is_equal(6, volumes.total)
+        assert.are.same({ { volume = 1, chapters = 2 }, { volume = 2, chapters = 3 }, { volume = 3, chapters = 1 } },
+            volumes.items)
+
+        -- Older servers: the API key allow-list refuses the route, or the route does not exist
+        for _, code in ipairs({ 403, 404 }) do
+            api.failures["volumes"] = { { "HTTP " .. code, code } }
+            local none, message, http_code = ChaptersBook.fetch_volumes(api, BOOK_ID)
+            assert.is_nil(none)
+            assert.is_equal("HTTP " .. code, message)
+            assert.is_equal(code, http_code)
+        end
+        -- A client object without the method (should never happen, must not crash)
+        assert.is_nil(ChaptersBook.fetch_volumes({}, BOOK_ID))
+
+        -- A volume copy cannot be built without the volume list
+        api.failures["volumes"] = { { "HTTP 404", 404 } }
+        local dir = tmp_dir()
+        local result, err = build(api, dir .. "/Book - Vol 02.epub", { volume = 2 })
+        assert.is_nil(result)
+        assert.is_truthy(tostring(err):find("volume list", 1, true))
+        assert.is_false(exists(dir .. "/Book - Vol 02.epub"))
+        assert.is_false(exists(dir .. "/Book - Vol 02.epub.tmp"))
+    end)
+
+    it("names volume files and keeps every copy to itself", function()
+        assert.is_equal("Vol 03", ChaptersBook.volume_file_suffix(3))
+        assert.is_equal("Vol 12", ChaptersBook.volume_file_suffix(12))
+        assert.is_equal("Vol 03.5", ChaptersBook.volume_file_suffix(3.5))
+        assert.is_equal("Vol 00", ChaptersBook.volume_file_suffix(0))
+        assert.is_equal("Vol 120", ChaptersBook.volume_file_suffix(120))
+
+        local dir = tmp_dir()
+        local api = new_fake_api(volumes_book())
+        api.images["one.png"] = PNG
+        api.images["two.png"] = PNG
+        local function load(path) return ChaptersBook.load_layout(path, read_fake_existing) end
+
+        -- New files: the whole book and two volumes
+        local whole = ChaptersBook.resolve_target(dir, "Book", BOOK_ID, load)
+        local vol2 = ChaptersBook.resolve_target(dir, "Book", BOOK_ID, load, 2)
+        local vol3 = ChaptersBook.resolve_target(dir, "Book", BOOK_ID, load, 3)
+        assert.is_equal(dir .. "/Book.epub", whole)
+        assert.is_equal(dir .. "/Book - Vol 02.epub", vol2)
+        assert.is_equal(dir .. "/Book - Vol 03.epub", vol3)
+        assert.is_true(ChaptersBook.commit(assert(build(api, whole))))
+        assert.is_true(ChaptersBook.commit(assert(build(api, vol2, { volume = 2 }))))
+
+        -- Each scope finds its own copy
+        local path, layout = ChaptersBook.resolve_target(dir, "Book", BOOK_ID, load)
+        assert.is_equal(whole, path)
+        assert.is_nil(layout.volume)
+        path, layout = ChaptersBook.resolve_target(dir, "Book", BOOK_ID, load, 2)
+        assert.is_equal(vol2, path)
+        assert.is_equal(2, layout.volume)
+        path, layout = ChaptersBook.resolve_target(dir, "Book", BOOK_ID, load, 3)
+        assert.is_equal(vol3, path)
+        assert.is_nil(layout)
+
+        -- A file of the same book but of another scope is never overwritten
+        local result, err = build(api, vol2, { volume = 3 })
+        assert.is_nil(result)
+        assert.is_equal(ChaptersBook.ERR_NAME_TAKEN, err)
+        result, err = build(api, vol2)
+        assert.is_nil(result)
+        assert.is_equal(ChaptersBook.ERR_NAME_TAKEN, err)
+        result, err = build(api, whole, { volume = 2 })
+        assert.is_nil(result)
+        assert.is_equal(ChaptersBook.ERR_NAME_TAKEN, err)
+        assert.are.same({ "v2-a", "v2-b", "v2-c" }, load(vol2).chapter_ids)
+        assert.is_equal(6, #load(whole).chapter_ids)
+
+        -- Another book that would get the same name: its volume goes next to it
+        local other_path = ChaptersBook.resolve_target(dir, "Book", OTHER_BOOK_ID, load, 2)
+        assert.is_equal(dir .. "/Book - Vol 02 (" .. OTHER_BOOK_ID:sub(1, 8) .. ").epub", other_path)
+    end)
+
+    it("updates a volume on its own and follows the book as it grows", function()
+        local dir = tmp_dir()
+        local target = dir .. "/Book - Vol 02.epub"
+        local api = new_fake_api(volumes_book())
+        api.images["two.png"] = PNG
+        assert.is_true(ChaptersBook.commit(assert(build(api, target, { volume = 2 }))))
+        local size = io.open(target, "rb"):seek("end")
+
+        -- New chapters in other volumes: this file is not rewritten, but its place moves
+        local extra = chapter("v1-c", 2.5, "Two and a half", "v1 c")
+        extra.volume = 1
+        table.insert(api.chapters, 3, extra)
+        api.requests = {}
+        local result = assert(build(api, target, { volume = 2 }))
+        assert.is_true(result.unchanged)
+        assert.is_equal(0, api:count("chapter:"))
+        assert.is_true(ChaptersBook.commit(result))
+        assert.is_equal(size, io.open(target, "rb"):seek("end"))
+        local layout = ChaptersBook.load_layout(target, read_fake_existing)
+        assert.are.same({ 2, 3, 7 }, { layout.volume, layout.chapters_before, layout.book_chapters })
+
+        -- A new chapter in this volume: only that one is downloaded
+        local added = chapter("v2-d", 5.5, "Five and a half", "v2 d")
+        added.volume = 2
+        table.insert(api.chapters, 7, added)
+        api.requests = {}
+        result = assert(build(api, target, { volume = 2 }))
+        assert.is_false(result.unchanged)
+        assert.is_equal(1, result.chapters_fetched)
+        assert.is_equal(1, api:count("chapter:"))
+        assert.is_equal(0, api:count("image:"))
+        assert.is_true(ChaptersBook.commit(result))
+        layout = ChaptersBook.load_layout(target, read_fake_existing)
+        assert.are.same({ "v2-a", "v2-b", "v2-c", "v2-d" }, layout.chapter_ids)
+        assert.are.same({ 2, 3, 8 }, { layout.volume, layout.chapters_before, layout.book_chapters })
+    end)
+
+    it("counts percentages in the whole book", function()
+        local whole = ChaptersBook.make_layout(BOOK_ID, { "a", "b" })
+        assert.is_equal(40, ChaptersBook.to_book_percent(whole, 40))
+        assert.is_equal(40, ChaptersBook.from_book_percent(whole, 40))
+        assert.is_true(ChaptersBook.ends_book(whole))
+
+        -- Chapters 21..30 of 100
+        local ids = {}
+        for i = 1, 10 do ids[i] = "c" .. i end
+        local volume = ChaptersBook.make_layout(BOOK_ID, ids, { volume = 3, chapters_before = 20, book_chapters = 100 })
+        assert.is_true(ChaptersBook.is_volume_copy(volume))
+        assert.is_false(ChaptersBook.ends_book(volume))
+        assert.is_equal(20, ChaptersBook.to_book_percent(volume, 0))
+        assert.is_equal(25, ChaptersBook.to_book_percent(volume, 50))
+        assert.is_equal(30, ChaptersBook.to_book_percent(volume, 100))
+        assert.is_equal(30, ChaptersBook.to_book_percent(volume, 250))
+        assert.is_equal(50, ChaptersBook.from_book_percent(volume, 25))
+        assert.is_equal(0, ChaptersBook.from_book_percent(volume, 5))
+        assert.is_equal(100, ChaptersBook.from_book_percent(volume, 80))
+        assert.is_nil(ChaptersBook.to_book_percent(volume, nil))
+
+        -- The last volume ends the book; stale counts never put a copy past the end
+        local last = ChaptersBook.make_layout(BOOK_ID, ids, { volume = 9, chapters_before = 90, book_chapters = 100 })
+        assert.is_true(ChaptersBook.ends_book(last))
+        assert.is_equal(100, ChaptersBook.to_book_percent(last, 100))
+        local stale = ChaptersBook.make_layout(BOOK_ID, ids, { volume = 9, chapters_before = 95, book_chapters = 100 })
+        assert.is_equal(105, stale.book_chapters)
+        assert.is_equal(100, ChaptersBook.to_book_percent(stale, 100))
+    end)
+
+    it("translates bookmark and annotation positions to and from the whole book", function()
+        local whole = ChaptersBook.make_layout(BOOK_ID, { "a", "b", "c" })
+        local volume = ChaptersBook.make_layout(BOOK_ID, { "a", "b", "c" },
+            { volume = 2, chapters_before = 10, book_chapters = 20 })
+        local xp = "/body/DocFragment[2]/body/section/p[3]/text().7"
+
+        assert.is_equal(xp, ChaptersBook.to_server_xpointer(whole, xp))
+        assert.is_equal(xp, ChaptersBook.to_local_xpointer(whole, xp))
+        assert.is_equal("/body/DocFragment[12]/body/section/p[3]/text().7", ChaptersBook.to_server_xpointer(volume, xp))
+        assert.is_equal(xp, ChaptersBook.to_local_xpointer(volume, "/body/DocFragment[12]/body/section/p[3]/text().7"))
+        -- crengine leaves the index out of a single-fragment book
+        assert.is_equal("/body/DocFragment[11]/body/p", ChaptersBook.to_server_xpointer(volume, "/body/DocFragment/body/p"))
+        -- Other volumes
+        assert.is_nil(ChaptersBook.to_local_xpointer(volume, "/body/DocFragment[10]/body/p"))
+        assert.is_nil(ChaptersBook.to_local_xpointer(volume, "/body/DocFragment[14]/body/p"))
+        assert.is_nil(ChaptersBook.to_local_xpointer(volume, "/body/DocFragment/body/p"))
+        -- Positions that name no chapter cannot be placed: left alone both ways
+        assert.is_equal("page_4", ChaptersBook.to_server_xpointer(volume, "page_4"))
+        assert.is_equal("page_4", ChaptersBook.to_local_xpointer(volume, "page_4"))
+
+        local remote = {
+            { id = "r1", locationStart = "/body/DocFragment[11]/body/p[1]/text().0", locationEnd = "/body/DocFragment[11]/body/p[1]/text().9" },
+            { id = "r2", locationStart = "/body/DocFragment[3]/body/p[1]/text().0", locationEnd = "/body/DocFragment[3]/body/p[1]/text().9" },
+            { id = "r3", location = "/body/DocFragment[13]/body/p[2]" },
+            { id = "r4", location = "/body/DocFragment[40]/body/p[2]" },
+            { id = "r5", location = "page_3" },
+        }
+        assert.is_equal(remote, ChaptersBook.localize_items(whole, remote))
+        local localized = ChaptersBook.localize_items(volume, remote)
+        assert.is_equal(3, #localized)
+        assert.are.same({ id = "r1", locationStart = "/body/DocFragment[1]/body/p[1]/text().0",
+            locationEnd = "/body/DocFragment[1]/body/p[1]/text().9" }, localized[1])
+        assert.are.same({ id = "r3", location = "/body/DocFragment[3]/body/p[2]" }, localized[2])
+        assert.are.same({ id = "r5", location = "page_3" }, localized[3])
+        -- The server's own items are not touched
+        assert.is_equal("/body/DocFragment[11]/body/p[1]/text().0", remote[1].locationStart)
+
+        local payload = { locationStart = "/body/DocFragment[1]/body/p[1]/text().0", locationEnd = "", note = "n" }
+        assert.is_equal(payload, ChaptersBook.globalize_item(whole, payload))
+        assert.are.same({ locationStart = "/body/DocFragment[11]/body/p[1]/text().0", locationEnd = "", note = "n" },
+            ChaptersBook.globalize_item(volume, payload))
+        assert.is_equal("/body/DocFragment[1]/body/p[1]/text().0", payload.locationStart)
+    end)
+end)
+
+describe("Manager with a copy of one volume", function()
+    local Manager = require("manager")
+    local FILE = "/books/Novel - Vol 02.epub"
+    local LAST = "/books/Novel - Vol 03.epub"
+    -- Chapters 5..8 of 10, and the last two
+    local layout = ChaptersBook.make_layout(BOOK_ID, { "c5", "c6", "c7", "c8" },
+        { volume = 2, chapters_before = 4, book_chapters = 10 })
+    local last_layout = ChaptersBook.make_layout(BOOK_ID, { "c9", "c10" },
+        { volume = 3, chapters_before = 8, book_chapters = 10 })
+
+    local function new_manager(api)
+        local mgr = Manager:new({ api = api, settings = {} })
+        mgr._chapters_layouts = { [FILE] = layout, [LAST] = last_layout, ["/books/Regular.epub"] = false }
+        mgr.resolve_book_id = function(_, _ui, _doc, cb) cb(BOOK_ID) end
+        if not api.list_annotations then
+            -- push_all_data goes on to annotations and sessions: not what these tests are about
+            mgr.sync_annotations_and_bookmarks = function() end
+        end
+        if not api.push_reading_sessions then
+            mgr.sync_reading_sessions = function() end
+        end
+        return mgr
+    end
+
+    local function doc_info(file, location, percent)
+        return { file = file, file_path = file, title = "Novel", location = location, percent = percent or 50,
+            total_pages = 100, current_page = 50 }
+    end
+
+    local function progress_api(remote, pushed)
+        return {
+            has_auth = function() return true end,
+            get_progress = function(_, _id, cb) cb(remote ~= nil, remote) end,
+            update_progress = function(_, _id, location, percent, is_read, cb)
+                pushed[#pushed + 1] = { location = location, percent = percent, is_read = is_read,
+                    has_read = is_read ~= nil }
+                if cb then cb(true) end
+            end,
+        }
+    end
+
+    it("pushes the chapter and a percentage of the whole book", function()
+        local pushed = {}
+        local mgr = new_manager(progress_api(nil, pushed))
+        mgr.get_doc_read_status = function() return false end
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[2]/body/section/p[3]/text().1", 50) end
+        mgr:sync_progress(nil, nil, true)
+        assert.is_equal("ch:c6", pushed[1].location)
+        -- Half of chapters 5..8 of 10
+        assert.is_equal(60, pushed[1].percent)
+        assert.is_false(pushed[1].has_read)
+
+        mgr:push_all_data(nil, nil, false)
+        assert.is_equal(60, pushed[2].percent)
+        assert.is_false(pushed[2].has_read)
+    end)
+
+    it("does not call the book read when a volume is finished", function()
+        local pushed = {}
+        local remote = { location = "ch:c5", progressPercent = 45, isRead = false }
+        local mgr = new_manager(progress_api(remote, pushed))
+        local marked = {}
+        mgr.set_local_read_status = function(_, info, is_read) marked[#marked + 1] = { info.file, is_read } end
+        mgr.get_doc_read_status = function() return true end
+
+        -- The volume is finished, the book goes on: the flag is not sent at all
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[4]/body/p", 100) end
+        mgr:sync_progress(nil, nil, true)
+        assert.is_equal(1, #pushed)
+        assert.is_equal(80, pushed[1].percent)
+        assert.is_false(pushed[1].has_read)
+        mgr:push_all_data(nil, nil, false)
+        assert.is_false(pushed[2].has_read)
+
+        -- A book that is read on the server stays read
+        remote.isRead = true
+        mgr:sync_progress(nil, nil, true)
+        assert.is_true(pushed[3].is_read)
+        assert.is_equal(0, #marked)
+        -- ...and marks an unfinished volume as read, as it does with a whole book
+        mgr.get_doc_read_status = function() return false end
+        mgr:sync_progress(nil, nil, true)
+        assert.are.same({ FILE, true }, marked[1])
+        assert.is_true(pushed[4].is_read)
+
+        -- The last volume ends the book: finishing it finishes the book
+        remote.isRead = false
+        mgr.get_doc_read_status = function() return true end
+        mgr.get_doc_info = function() return doc_info(LAST, "/body/DocFragment[2]/body/p", 100) end
+        mgr:sync_progress(nil, nil, true)
+        assert.is_true(pushed[5].is_read)
+        assert.is_equal(100, pushed[5].percent)
+        assert.is_equal("ch:c10", pushed[5].location)
+    end)
+
+    it("leaves a position in a later volume alone and overtakes one in an earlier volume", function()
+        local pushed = {}
+        local remote = { location = "ch:c9", progressPercent = 85, isRead = false }
+        local mgr = new_manager(progress_api(remote, pushed))
+        mgr.get_doc_read_status = function() return false end
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[4]/body/p", 99) end
+
+        -- The server is in volume 3: 99% of volume 2 is 79.6% of the book
+        mgr:sync_progress(nil, nil, true)
+        assert.is_equal(0, #pushed)
+
+        -- The server is in volume 1 at 30% of the book
+        remote.location, remote.progressPercent = "ch:c2", 30
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[1]/body/p", 1) end
+        mgr:sync_progress(nil, nil, true)
+        assert.is_equal(1, #pushed)
+        assert.is_equal("ch:c5", pushed[1].location)
+    end)
+
+    it("opens a server position of this volume and stays quiet about other volumes", function()
+        local remote = { location = "ch:c7", progressPercent = 65, isRead = false }
+        local mgr = new_manager(progress_api(remote, {}))
+        local jumps, notified = {}, 0
+        mgr.goto_location = function(_, _ui, pos, percent) jumps[#jumps + 1] = { pos = pos, percent = percent } end
+        mgr.notify_missing_chapter = function() notified = notified + 1 end
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[1]/body/p", 10) end
+
+        mgr:pull_progress(nil, nil, false)
+        assert.are.same({ { pos = "/body/DocFragment[3]/body" } }, jumps)
+
+        -- Another volume: nothing to open, and nothing the user has to do about it
+        remote.location = "ch:c2"
+        mgr:pull_progress(nil, nil, false)
+        remote.location = "ch:c9"
+        mgr:pull_progress(nil, nil, false)
+        assert.is_equal(1, #jumps)
+        assert.is_equal(0, notified)
+    end)
+
+    it("marks a volume in the document menu on the device only", function()
+        package.loaded["menus"] = nil
+        local Menus = require("menus")
+        local pushed = {}
+        local api = progress_api(nil, pushed)
+        local mgr = new_manager(api)
+        local marked = {}
+        mgr.set_local_read_status = function(_, info, is_read) marked[#marked + 1] = { info.file, is_read } end
+        mgr.get_doc_read_status = function() return false end
+        local menus = setmetatable({ api = api, plugin = { manager = mgr, get_ui = function() return {} end } },
+            { __index = Menus })
+
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[4]/body/p", 100) end
+        menus:toggle_active_doc_read_status()
+        assert.are.same({ FILE, true }, marked[1])
+        assert.is_equal(0, #pushed)
+
+        -- The last volume speaks for the book
+        mgr.get_doc_info = function() return doc_info(LAST, "/body/DocFragment[2]/body/p", 100) end
+        menus:toggle_active_doc_read_status()
+        assert.are.same({ LAST, true }, marked[2])
+        assert.is_true(pushed[1].is_read)
+        assert.is_equal(100, pushed[1].percent)
+    end)
+
+    it("sends reading sessions in percentages of the whole book", function()
+        local sent
+        local api = {
+            has_auth = function() return true end,
+            push_reading_sessions = function(_, sessions, cb) sent = sessions; cb(true) end,
+        }
+        local mgr = new_manager(api)
+        local states = {}
+        mgr.load_sync_state = function(_, path) return states[path] or { pending_sessions = {} } end
+        mgr.save_sync_state = function(_, state, path) states[path] = state end
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[2]/body/p", 50) end
+        states[FILE] = { pending_sessions = { { client_session_id = "s1", start_time = "t0", end_time = "t1",
+            duration_seconds = 60, start_progress = 25, end_progress = 75, pages_read = 3 } } }
+
+        mgr:sync_reading_sessions(nil, nil)
+        assert.is_equal(50, sent[1].startProgress)
+        assert.is_equal(70, sent[1].endProgress)
+        assert.is_equal(0, #states[FILE].pending_sessions)
+
+        -- Any other book is sent as recorded
+        mgr.get_doc_info = function() return doc_info("/books/Regular.epub", "/body/DocFragment[2]/body/p", 50) end
+        states["/books/Regular.epub"] = { pending_sessions = { { client_session_id = "s2", start_time = "t0",
+            end_time = "t1", duration_seconds = 60, start_progress = 25, end_progress = 75 } } }
+        mgr:sync_reading_sessions(nil, nil)
+        assert.is_equal(25, sent[1].startProgress)
+        assert.is_equal(75, sent[1].endProgress)
+    end)
+
+    -- A server with highlights and bookmarks all over the book
+    local function annotations_api(remote_annos, remote_bms, log)
+        return {
+            has_auth = function() return true end,
+            list_annotations = function(_, _id, _since, cb) cb(true, remote_annos) end,
+            list_bookmarks = function(_, _id, _since, cb) cb(true, remote_bms) end,
+            create_annotation = function(_, _id, payload, cb)
+                log[#log + 1] = { "create_annotation", payload }
+                if cb then cb(true, { id = "new-a" .. #log }) end
+            end,
+            update_annotation = function(_, _id, fid, payload) log[#log + 1] = { "update_annotation", payload, fid } end,
+            delete_annotation = function(_, _id, fid) log[#log + 1] = { "delete_annotation", fid } end,
+            create_bookmark = function(_, _id, payload, cb)
+                log[#log + 1] = { "create_bookmark", payload }
+                if cb then cb(true, { id = "new-b" .. #log }) end
+            end,
+            delete_bookmark = function(_, _id, fid) log[#log + 1] = { "delete_bookmark", fid } end,
+        }
+    end
+
+    local function new_docsettings(items)
+        local data = { annotations = items }
+        return {
+            data = data,
+            readSetting = function(_, key) return data[key] end,
+            saveSetting = function(_, key, value) data[key] = value end,
+            flush = function() end,
+        }
+    end
+
+    it("syncs only its own bookmarks and annotations, in whole-book positions", function()
+        local remote_annos = {
+            { id = "a-vol1", locationStart = "/body/DocFragment[2]/body/p[1]/text().0",
+                locationEnd = "/body/DocFragment[2]/body/p[1]/text().5", selectedText = "early" },
+            { id = "a-vol2", locationStart = "/body/DocFragment[6]/body/p[1]/text().0",
+                locationEnd = "/body/DocFragment[6]/body/p[1]/text().5", selectedText = "mine" },
+            { id = "a-vol3", locationStart = "/body/DocFragment[9]/body/p[1]/text().0",
+                locationEnd = "/body/DocFragment[9]/body/p[1]/text().5", selectedText = "late" },
+        }
+        local remote_bms = {
+            { id = "b-vol1", location = "/body/DocFragment[1]/body/p[4]", title = "Early" },
+            { id = "b-vol2", location = "/body/DocFragment[8]/body/p[4]", title = "Mine" },
+        }
+        local log = {}
+        local mgr = new_manager(annotations_api(remote_annos, remote_bms, log))
+        local states = {}
+        mgr.load_sync_state = function(_, path)
+            return states[path] or { has_synced_annos = false, has_synced_bms = false, annotations = {}, bookmarks = {},
+                pending_sessions = {} }
+        end
+        mgr.save_sync_state = function(_, state, path) states[path] = state end
+
+        local docsettings = new_docsettings({
+            { pos0 = "/body/DocFragment[3]/body/p[2]/text().0", pos1 = "/body/DocFragment[3]/body/p[2]/text().4",
+                page = "/body/DocFragment[3]/body/p[2]/text().0", text = "local highlight" },
+            { pos0 = "/body/DocFragment[1]/body/p[9]", page = "/body/DocFragment[1]/body/p[9]", text = "Local mark" },
+        })
+        local info = doc_info(FILE, "/body/DocFragment[2]/body/p", 50)
+        info.docsettings = docsettings
+        mgr.get_doc_info = function() return info end
+
+        local function find(pos0)
+            for _, item in ipairs(docsettings.data.annotations) do
+                if item.pos0 == pos0 then return item end
+            end
+        end
+
+        -- First sync: local items go up shifted by the four chapters before this volume,
+        -- the server's items of this volume come down shifted back
+        mgr:sync_annotations(nil, nil, false)
+        mgr:sync_bookmarks(nil, nil, false)
+        assert.is_equal(2, #log)
+        assert.is_equal("create_annotation", log[1][1])
+        assert.is_equal("/body/DocFragment[7]/body/p[2]/text().0", log[1][2].locationStart)
+        assert.is_equal("/body/DocFragment[7]/body/p[2]/text().4", log[1][2].locationEnd)
+        assert.is_equal("create_bookmark", log[2][1])
+        assert.is_equal("/body/DocFragment[5]/body/p[9]", log[2][2].location)
+
+        assert.is_equal(4, #docsettings.data.annotations)
+        local pulled = find("/body/DocFragment[2]/body/p[1]/text().0")
+        assert.is_equal("a-vol2", pulled.folio_id)
+        assert.is_equal("/body/DocFragment[2]/body/p[1]/text().5", pulled.pos1)
+        assert.is_equal("b-vol2", find("/body/DocFragment[4]/body/p[4]").folio_id)
+        -- Nothing of the other volumes came in
+        for _, item in ipairs(docsettings.data.annotations) do
+            assert.is_falsy(item.folio_id == "a-vol1" or item.folio_id == "a-vol3" or item.folio_id == "b-vol1")
+        end
+
+        -- The server now has what was pushed (as it stores it) next to the rest
+        remote_annos[#remote_annos + 1] = { id = find("/body/DocFragment[3]/body/p[2]/text().0").folio_id,
+            locationStart = "/body/DocFragment[7]/body/p[2]/text().0", locationEnd = "/body/DocFragment[7]/body/p[2]/text().4",
+            selectedText = "local highlight" }
+        remote_bms[#remote_bms + 1] = { id = find("/body/DocFragment[1]/body/p[9]").folio_id,
+            location = "/body/DocFragment[5]/body/p[9]", title = "Local mark" }
+
+        -- Following full syncs: nothing to do — above all, the other volumes' items are
+        -- neither deleted on the server nor missed here
+        log = {}
+        mgr.api = annotations_api(remote_annos, remote_bms, log)
+        mgr:sync_annotations(nil, nil, true)
+        mgr:sync_bookmarks(nil, nil, true)
+        assert.are.same({}, log)
+        assert.is_equal(4, #docsettings.data.annotations)
+
+        -- A highlight removed on the device is removed on the server by its id only
+        for index, item in ipairs(docsettings.data.annotations) do
+            if item.folio_id == "a-vol2" then
+                table.remove(docsettings.data.annotations, index)
+                break
+            end
+        end
+        mgr:sync_annotations(nil, nil, true)
+        assert.are.same({ { "delete_annotation", "a-vol2" } }, log)
+
+        -- A highlight removed on the server disappears here; the other volumes' stay there
+        log = {}
+        mgr.api = annotations_api({ remote_annos[1], remote_annos[3] }, remote_bms, log)
+        mgr:sync_annotations(nil, nil, true)
+        assert.are.same({}, log)
+        assert.is_nil(find("/body/DocFragment[3]/body/p[2]/text().0"))
+        assert.is_equal(2, #docsettings.data.annotations)
+    end)
+
+    it("downloads and updates a volume as a file of its own", function()
+        local dir = tmp_dir()
+        local target = dir .. "/Novel - Vol 02.epub"
+        local api = new_fake_api(volumes_book())
+        api.images["two.png"] = PNG
+        api.has_auth = function() return true end
+
+        local real_build = ChaptersBook.build
+        local seen = {}
+        ChaptersBook.build = function(a, opts)
+            opts.open_sink = open_fake_sink
+            opts.read_existing = read_fake_existing
+            seen[#seen + 1] = { volume = opts.volume, title = opts.title }
+            return real_build(a, opts)
+        end
+        finally(function() ChaptersBook.build = real_build end)
+
+        local mgr = Manager:new({ api = api, settings = {} })
+        local done
+        mgr:download_chapters_book({ id = BOOK_ID, name = "Novel", volume = 2 }, target, function(success, result)
+            done = { success = success, result = result }
+        end)
+        assert.is_true(done.success)
+        assert.is_equal(2, seen[1].volume)
+        local layout_now = mgr:get_chapters_layout(target)
+        assert.are.same({ "v2-a", "v2-b", "v2-c" }, layout_now.chapter_ids)
+        assert.are.same({ 2, 2, 6 }, { layout_now.volume, layout_now.chapters_before, layout_now.book_chapters })
+        assert.is_equal(BOOK_ID, mgr:resolve_book_id({ document = { file = target } }, { file = target }))
+
+        -- "Update Book Chapters" on the open volume updates that volume
+        local added = chapter("v2-d", 5.5, "Five and a half", "v2 d")
+        added.volume = 2
+        table.insert(api.chapters, 6, added)
+        mgr.get_doc_info = function()
+            return { file = target, file_path = target, title = "Server Title — Том 2" }
+        end
+        local shown = {}
+        local UIManager = require("ui/uimanager")
+        local real_show = UIManager.show
+        UIManager.show = function(_, widget) shown[#shown + 1] = widget end
+        finally(function() UIManager.show = real_show end)
+        mgr:update_active_chapters_book()
+        assert.is_equal(2, seen[2].volume)
+        assert.is_nil(seen[2].title)
+        assert.are.same({ "v2-a", "v2-b", "v2-c", "v2-d" }, mgr:get_chapters_layout(target).chapter_ids)
+        assert.is_truthy(tostring(shown[#shown].text):find("Server Title — Том 2", 1, true))
+    end)
+end)
+
+describe("Library browser with a book of several volumes", function()
+    local function new_browser(api, download_dir)
+        package.loaded["browser"] = nil
+        local FolioBrowser = require("browser")
+        local browser = setmetatable({
+            api = api,
+            plugin = { settings = { download_dir = download_dir, create_series_folders = false } },
+            paths = {},
+        }, { __index = FolioBrowser })
+        return browser
+    end
+
+    local function capture_shown()
+        local shown = {}
+        local UIManager = require("ui/uimanager")
+        local real_show = UIManager.show
+        UIManager.show = function(_, widget) shown[#shown + 1] = widget end
+        finally(function() UIManager.show = real_show end)
+        return shown
+    end
+
+    it("offers the whole book or a volume and marks the copies on the device", function()
+        local dir = tmp_dir()
+        local api = new_fake_api(volumes_book())
+        api.images["one.png"] = PNG
+        api.images["two.png"] = PNG
+        local book = { id = BOOK_ID, name = "Novel", author = "Ann", kind = "Chapters" }
+
+        -- Volume 2 is already on the device
+        local real_load = ChaptersBook.load_layout
+        ChaptersBook.load_layout = function(path) return real_load(path, read_fake_existing) end
+        finally(function() ChaptersBook.load_layout = real_load end)
+        local vol2 = dir .. "/Novel - Ann - Vol 02.epub"
+        assert.is_true(ChaptersBook.commit(assert(build(api, vol2, { volume = 2 }))))
+
+        local shown = capture_shown()
+        local browser = new_browser(api, dir)
+        local started = {}
+        browser.plugin.manager = {
+            download_chapters_book = function(_, request, target_path) started[#started + 1] = { request, target_path } end,
+        }
+
+        browser:start_download(book, dir)
+        local menu = shown[#shown]
+        assert.is_equal(4, #menu.item_table)
+        assert.is_equal("Whole book (6 chapters)", menu.item_table[1].text)
+        assert.is_nil(menu.item_table[1].mandatory)
+        assert.is_equal("Volume 1 (2 chapters)", menu.item_table[2].text)
+        assert.is_nil(menu.item_table[2].mandatory)
+        assert.is_equal("Volume 2 (3 chapters)", menu.item_table[3].text)
+        assert.is_equal("on device", menu.item_table[3].mandatory)
+        assert.is_equal("Volume 3 (1 chapters)", menu.item_table[4].text)
+
+        -- A new volume: asks, then downloads into its own file
+        menu.item_table[4].callback()
+        local confirm = shown[#shown]
+        assert.is_truthy(tostring(confirm.text):find("Download 'Novel — Volume 3'", 1, true))
+        confirm.ok_callback()
+        assert.is_equal(3, started[1][1].volume)
+        assert.is_equal("Novel — Volume 3", started[1][1].display_title)
+        assert.is_equal(dir .. "/Novel - Ann - Vol 03.epub", started[1][2])
+
+        -- The volume that is on the device: offers an update of that file
+        menu.item_table[3].callback()
+        confirm = shown[#shown]
+        assert.is_truthy(tostring(confirm.text):find("'Novel — Volume 2' is already on this device", 1, true))
+        confirm.ok_callback()
+        assert.is_equal(2, started[2][1].volume)
+        assert.is_equal(vol2, started[2][2])
+
+        -- The whole book: the file it always had
+        menu.item_table[1].callback()
+        confirm = shown[#shown]
+        assert.is_truthy(tostring(confirm.text):find("Download 'Novel' to", 1, true))
+        confirm.ok_callback()
+        assert.is_nil(started[3][1].volume)
+        assert.is_nil(started[3][1].display_title)
+        assert.is_equal(dir .. "/Novel - Ann.epub", started[3][2])
+    end)
+
+    it("downloads the whole book when there is nothing to choose from", function()
+        local dir = tmp_dir()
+        local book = { id = BOOK_ID, name = "Novel", kind = "Chapters" }
+        local shown = capture_shown()
+
+        -- One volume
+        local api = new_fake_api({ chapter("ch-a", 1, "First", "one"), chapter("ch-b", 2, "Second", "two") })
+        local browser = new_browser(api, dir)
+        browser:start_download(book, dir)
+        assert.is_equal(1, #shown)
+        assert.is_truthy(tostring(shown[1].text):find("Download 'Novel' to", 1, true))
+        assert.is_nil(shown[1].item_table)
+
+        -- A server that cannot list volumes (older Folio): no question, no error
+        for _, code in ipairs({ 403, 404 }) do
+            api = new_fake_api(volumes_book())
+            api.failures["volumes"] = { { "HTTP " .. code, code } }
+            browser = new_browser(api, dir)
+            local before = #shown
+            browser:start_download(book, dir)
+            assert.is_equal(before + 1, #shown)
+            assert.is_nil(shown[#shown].item_table)
+            assert.is_truthy(tostring(shown[#shown].text):find("Download 'Novel' to", 1, true))
+        end
+    end)
+end)
+
 -- ---- API client ----
 
 describe("Folio API for Chapters books", function()
@@ -1032,6 +1831,37 @@ describe("Folio API for Chapters books", function()
 
         api:get_book_cover(BOOK_ID)
         assert.is_equal("http://localhost:5144/api/books/" .. BOOK_ID .. "/cover", requests[4].url)
+    end)
+
+    it("requests the volumes of a book and the chapters of one volume", function()
+        local requests = {}
+        local FolioAPI = install_http(function(req)
+            requests[#requests + 1] = req
+            if req.url:find("/volumes", 1, true) then
+                req.sink('{"items":[{"volume":1,"chaptersCount":2},{"volume":2.5,"chaptersCount":3}],"chaptersTotal":5}')
+            else
+                req.sink('{"items":[{"id":"ch-a","volume":2.5}],"more":false,"total":1}')
+            end
+            return 1, 200, {}
+        end)
+        local api = FolioAPI:new({ server_url = "http://localhost:5144/api/", api_key = "key123" })
+
+        local ok, data = api:list_volumes(BOOK_ID)
+        assert.is_true(ok)
+        assert.is_equal(5, data.chaptersTotal)
+        assert.is_equal("http://localhost:5144/api/books/" .. BOOK_ID .. "/volumes", requests[1].url)
+        assert.is_equal("key123", requests[1].headers["X-API-Key"])
+
+        api:list_chapters(BOOK_ID, 0, 500, 3)
+        assert.is_equal("http://localhost:5144/api/books/" .. BOOK_ID .. "/chapters?offset=0&limit=500&volume=3", requests[2].url)
+        api:list_chapters(BOOK_ID, 500, 500, 2.5)
+        assert.is_equal("http://localhost:5144/api/books/" .. BOOK_ID .. "/chapters?offset=500&limit=500&volume=2.5", requests[3].url)
+        -- No volume: the request is what it always was
+        api:list_chapters(BOOK_ID, 0, 500)
+        assert.is_equal("http://localhost:5144/api/books/" .. BOOK_ID .. "/chapters?offset=0&limit=500", requests[4].url)
+
+        local volumes = ChaptersBook.fetch_volumes(api, BOOK_ID)
+        assert.are.same({ { volume = 1, chapters = 2 }, { volume = 2.5, chapters = 3 } }, volumes.items)
     end)
 
     it("reports the HTTP status of a refused request and network errors", function()

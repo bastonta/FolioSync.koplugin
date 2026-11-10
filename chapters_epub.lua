@@ -12,6 +12,10 @@ What matters for an updatable local copy:
 - `META-INF/folio-chapters.json` records which chapters and illustrations the file holds;
 - the spine holds nothing but the chapters, so `DocFragment[N]` of a KOReader XPointer is
   the N-th chapter and can be converted to and from a chapter id.
+
+A file may hold the whole book or a single volume of it (`meta.volume`). A volume copy is
+titled `<title> — Volume N`, names the book as its series and records in the manifest
+where it sits in the book (`volume`, `chaptersBefore`, `bookChapters`).
 ]]
 
 local M = {}
@@ -87,6 +91,8 @@ local function format_number(n)
     return (string.format("%.7g", n))
 end
 
+M.format_number = format_number
+
 local function as_string(v)
     return type(v) == "string" and v or nil
 end
@@ -111,6 +117,11 @@ end
 
 local function volume_word(lang)
     return is_russian(lang) and "Том" or "Volume"
+end
+
+-- Title of a copy that holds a single volume of the book: `<title> — Volume N`.
+function M.volume_title(lang, title, volume)
+    return string.format("%s — %s %s", title, volume_word(lang), format_number(volume))
 end
 
 -- Table of contents label of a chapter.
@@ -487,18 +498,37 @@ local function build_opf(meta, title, chapters, images, cover)
         and ("    <dc:description>" .. escape_text(description) .. "</dc:description>\n") or ""
     local cover_meta = cover and '    <meta name="cover" content="cover-image"/>\n' or ""
 
+    -- A volume copy is one book of a series named after the whole book
+    local identifier = "urn:uuid:" .. tostring(meta.book_id)
+    local series_meta = ""
+    local volume = tonumber(meta.volume)
+    if volume then
+        local number = format_number(volume)
+        local series = trim(tostring(meta.title or ""))
+        if series == "" then series = "Untitled" end
+        identifier = "urn:folio:" .. tostring(meta.book_id) .. ":volume:" .. number
+        series_meta = table.concat({
+            '    <meta name="calibre:series" content="', escape_attr(series), '"/>\n',
+            '    <meta name="calibre:series_index" content="', number, '"/>\n',
+            '    <meta property="belongs-to-collection" id="series">', escape_text(series), "</meta>\n",
+            '    <meta refines="#series" property="collection-type">series</meta>\n',
+            '    <meta refines="#series" property="group-position">', number, "</meta>\n",
+        })
+    end
+
     return table.concat({
         '<?xml version="1.0" encoding="UTF-8"?>\n',
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" xml:lang="',
         lang, '">\n',
         '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n',
-        '    <dc:identifier id="pub-id">urn:uuid:', escape_text(meta.book_id), "</dc:identifier>\n",
+        '    <dc:identifier id="pub-id">', escape_text(identifier), "</dc:identifier>\n",
         "    <dc:title>", escape_text(title), "</dc:title>\n",
         '    <dc:creator id="creator">', escape_text(trim(tostring(meta.author or ""))), "</dc:creator>\n",
         "    <dc:language>", lang, "</dc:language>\n",
         description_xml,
         '    <meta property="dcterms:modified">', os.date("!%Y-%m-%dT%H:%M:%SZ"), "</meta>\n",
         cover_meta,
+        series_meta,
         "  </metadata>\n",
         "  <manifest>\n",
         table.concat(manifest),
@@ -660,12 +690,20 @@ function EpubWriter:finish(meta, chapters)
     local lang = meta.language
     local title = trim(tostring(meta.title or ""))
     if title == "" then title = "Untitled" end
+    local volume = tonumber(meta.volume)
+    if volume then
+        title = M.volume_title(lang, title, volume)
+    end
 
     local manifest = {
         version = M.MANIFEST_VERSION,
         bookId = meta.book_id,
         language = lang,
         cover = self.cover and self.cover.name or nil,
+        -- Only in a copy that holds a single volume: where it sits in the book
+        volume = volume,
+        chaptersBefore = volume and (tonumber(meta.chapters_before) or 0) or nil,
+        bookChapters = volume and (tonumber(meta.book_chapters) or #chapters) or nil,
         chapters = {},
     }
     for i, chapter in ipairs(chapters) do
@@ -711,6 +749,13 @@ local function normalize_manifest(data)
         cover = as_string(data.cover),
         chapters = {},
     }
+    -- A copy of a single volume (absent in a whole-book copy)
+    local volume = tonumber(data.volume)
+    if volume then
+        manifest.volume = volume
+        manifest.chapters_before = math.max(0, math.floor(tonumber(data.chaptersBefore) or 0))
+        manifest.book_chapters = math.max(0, math.floor(tonumber(data.bookChapters) or 0))
+    end
     for _, chapter in ipairs(data.chapters) do
         if type(chapter) == "table" and as_string(chapter.id) then
             local images = {}
@@ -878,6 +923,18 @@ function M.remap_xpointer_spine(xpointer, moved)
     if not old then return nil end
     local new = moved[old]
     if not new or new == old then return nil end
+    local rest = xpointer:match("^/body/DocFragment%[%d+%](.*)$") or xpointer:match("^/body/DocFragment(.*)$")
+    return string.format("/body/DocFragment[%d]%s", new + 1, rest or "")
+end
+
+-- The same position `delta` spine items further (or earlier, when negative). Returns nil
+-- when the XPointer names no spine item or the result would fall before the first one.
+function M.shift_xpointer_spine(xpointer, delta)
+    local old = M.xpointer_spine_index(xpointer)
+    if not old then return nil end
+    local new = old + delta
+    if new < 0 then return nil end
+    if delta == 0 then return xpointer end
     local rest = xpointer:match("^/body/DocFragment%[%d+%](.*)$") or xpointer:match("^/body/DocFragment(.*)$")
     return string.format("/body/DocFragment[%d]%s", new + 1, rest or "")
 end

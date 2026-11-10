@@ -5,6 +5,7 @@ local Event = require("ui/event")
 local logger = require("logger")
 local annotations_helper = require("annotations")
 local ChaptersBook = require("chapters_book")
+local ChaptersEpub = require("chapters_epub")
 local utils = require("utils")
 
 local Manager = {}
@@ -489,6 +490,24 @@ function Manager:outgoing_location(info)
     return ChaptersBook.outgoing_location(layout, info.location)
 end
 
+-- Percentage to send to the server for a local one. The server counts in the whole book,
+-- a copy of a single volume counts in itself; any other book is sent as it is.
+function Manager:outgoing_percent(info, percent)
+    if percent == nil then percent = info.percent end
+    local layout = self:get_chapters_layout(info.file or info.file_path)
+    if not layout then
+        return percent
+    end
+    return ChaptersBook.to_book_percent(layout, percent)
+end
+
+-- Whether the document is a copy of a volume that ends before the book does: finishing
+-- it says nothing about the book, so its read status stays on the device.
+function Manager:is_partial_copy(info)
+    local layout = info and self:get_chapters_layout(info.file or info.file_path)
+    return layout ~= nil and not ChaptersBook.ends_book(layout)
+end
+
 -- Synchronize reading progress for current document
 function Manager:sync_progress(ui, document, is_silent)
     if not self.api:has_auth() then
@@ -511,9 +530,12 @@ function Manager:sync_progress(ui, document, is_silent)
             return
         end
 
-        local percent = info.percent
+        local percent = self:outgoing_percent(info)
         local location = self:outgoing_location(info)
-        local is_read = self:get_doc_read_status(info)
+        local local_read = self:get_doc_read_status(info)
+        -- A finished volume is not a finished book
+        local partial = self:is_partial_copy(info)
+        local is_read = local_read and not partial
 
         -- Fetch remote progress first
         self.api:get_progress(book_id, function(success, remote_data)
@@ -524,8 +546,10 @@ function Manager:sync_progress(ui, document, is_silent)
                 if remote_is_read == nil then remote_is_read = remote_data.is_read end
 
                 -- If remote is marked as read and local is not marked as complete, update local status
-                if remote_is_read == true and not is_read then
-                    self:set_local_read_status(info, true, info.docsettings)
+                if remote_is_read == true then
+                    if not local_read then
+                        self:set_local_read_status(info, true, info.docsettings)
+                    end
                     is_read = true
                 end
 
@@ -552,7 +576,10 @@ function Manager:sync_progress(ui, document, is_silent)
             end
 
             if should_push then
-                self.api:update_progress(book_id, location, percent, is_read, function(push_ok)
+                -- A volume copy never clears the read flag of the book: it is left out
+                local read_flag = is_read
+                if partial and not is_read then read_flag = nil end
+                self.api:update_progress(book_id, location, percent, read_flag, function(push_ok)
                     if push_ok then
                         self._last_pushed_percent = self._last_pushed_percent or {}
                         self._last_pushed_percent[book_id] = percent
@@ -608,7 +635,13 @@ function Manager:sync_reading_sessions(ui, document, callback)
             return
         end
 
-        -- Prepare payload with resolved book_id
+        -- Prepare payload with resolved book_id.
+        -- Sessions are recorded in percentages of the file; the server counts in the book.
+        local layout = self:get_chapters_layout(info.file_path)
+        local function book_percent(value)
+            if not layout then return value end
+            return ChaptersBook.to_book_percent(layout, value)
+        end
         local payload_sessions = {}
         for _, s in ipairs(pending) do
             table.insert(payload_sessions, {
@@ -618,8 +651,8 @@ function Manager:sync_reading_sessions(ui, document, callback)
                 startTime = s.start_time,
                 endTime = s.end_time,
                 durationSeconds = s.duration_seconds,
-                startProgress = s.start_progress,
-                endProgress = s.end_progress,
+                startProgress = book_percent(s.start_progress),
+                endProgress = book_percent(s.end_progress),
                 pagesRead = s.pages_read or 0,
             })
         end
@@ -696,6 +729,17 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                 return
             end
 
+            -- A copy of a single volume: the server keeps positions by chapter of the whole
+            -- book. Its items are translated to this copy and those of other volumes are
+            -- left out, so they are neither pulled nor ever seen as deleted here.
+            local layout = self:get_chapters_layout(info.file or info.file_path)
+            if layout then
+                remote_annos = ChaptersBook.localize_items(layout, remote_annos)
+            end
+            local function to_server(payload)
+                return layout and ChaptersBook.globalize_item(layout, payload) or payload
+            end
+
             local docsettings = info.docsettings
             local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
             local raw_items = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
@@ -722,7 +766,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                         if not found then
                             local folio_annot = annotations_helper.koreader_to_folio_annotation(l_item)
                             if folio_annot then
-                                self.api:create_annotation(book_id, folio_annot, function(c_ok, c_data)
+                                self.api:create_annotation(book_id, to_server(folio_annot), function(c_ok, c_data)
                                     if c_ok and c_data and c_data.id then
                                         l_item.folio_id = c_data.id
                                         modified_raw = true
@@ -837,7 +881,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                         if not snap_item and not in_remote then
                             local folio_annot = annotations_helper.koreader_to_folio_annotation(l_item)
                             if folio_annot then
-                                self.api:create_annotation(book_id, folio_annot, function(c_ok, c_data)
+                                self.api:create_annotation(book_id, to_server(folio_annot), function(c_ok, c_data)
                                     if c_ok and c_data and c_data.id then
                                         l_item.folio_id = c_data.id
                                         modified_raw = true
@@ -849,7 +893,7 @@ function Manager:sync_annotations(ui, document, force_manual, callback)
                             if (l_item.note or "") ~= (snap_item.note or "") or (l_item.text or "") ~= (snap_item.text or "") or (l_item.color or "yellow") ~= (snap_item.color or "yellow") then
                                 local folio_annot = annotations_helper.koreader_to_folio_annotation(l_item)
                                 if folio_annot and fid then
-                                    self.api:update_annotation(book_id, fid, folio_annot)
+                                    self.api:update_annotation(book_id, fid, to_server(folio_annot))
                                 end
                             end
                         end
@@ -993,6 +1037,15 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                 return
             end
 
+            -- A copy of a single volume: see sync_annotations
+            local layout = self:get_chapters_layout(info.file or info.file_path)
+            if layout then
+                remote_bms = ChaptersBook.localize_items(layout, remote_bms)
+            end
+            local function to_server(payload)
+                return layout and ChaptersBook.globalize_item(layout, payload) or payload
+            end
+
             local docsettings = info.docsettings
             local target_ui = info.ui or (self.plugin and self.plugin.get_ui and self.plugin:get_ui()) or ui or self.ui
             local raw_items = docsettings and docsettings.readSetting and docsettings:readSetting("annotations") or {}
@@ -1019,7 +1072,7 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                         if not found then
                             local folio_bm = annotations_helper.koreader_to_folio_bookmark(l_item)
                             if folio_bm then
-                                self.api:create_bookmark(book_id, folio_bm, function(c_ok, c_data)
+                                self.api:create_bookmark(book_id, to_server(folio_bm), function(c_ok, c_data)
                                     if c_ok and c_data and c_data.id then
                                         l_item.folio_id = c_data.id
                                         modified_raw = true
@@ -1134,7 +1187,7 @@ function Manager:sync_bookmarks(ui, document, force_manual, callback)
                         if not in_state and not in_remote then
                             local folio_bm = annotations_helper.koreader_to_folio_bookmark(l_item)
                             if folio_bm then
-                                self.api:create_bookmark(book_id, folio_bm, function(c_ok, c_data)
+                                self.api:create_bookmark(book_id, to_server(folio_bm), function(c_ok, c_data)
                                     if c_ok and c_data and c_data.id then
                                         l_item.folio_id = c_data.id
                                         modified_raw = true
@@ -1254,9 +1307,13 @@ function Manager:push_all_data(ui, document, force_manual)
             utils.show_msg(_("Pushing all document data to Folio..."))
         end
 
-        local percent = info.percent
+        local percent = self:outgoing_percent(info)
         local location = self:outgoing_location(info)
         local is_read = self:get_doc_read_status(info)
+        if self:is_partial_copy(info) then
+            -- A finished volume is not a finished book: the book's read flag is left alone
+            is_read = nil
+        end
 
         self.api:update_progress(book_id, location, percent, is_read, function(push_prog_ok)
             if push_prog_ok then
@@ -1545,7 +1602,9 @@ function Manager:pull_progress(ui, document, force_manual, callback)
                         if kind == "at" then
                             -- No percentage fallback: it is counted differently by every client
                             self:goto_location(target_ui, xpointer, nil, info.total_pages, target_doc, info.title, info)
-                        elseif kind == "unknown" then
+                        elseif kind == "unknown" and not ChaptersBook.is_volume_copy(layout) then
+                            -- (a copy of one volume expects the position to be in another
+                            -- volume now and then: nothing to tell the user)
                             self:notify_missing_chapter(info.file or info.file_path)
                         end
                         -- "same": already in that chapter, the local position is more precise
@@ -1742,11 +1801,20 @@ Downloads a Folio `Chapters` book (a book that has no EPUB file on the server) c
 chapter and assembles it into a local EPUB at `target_path`; a copy that is already there
 is updated with the new and changed chapters.
 
+`book.volume` downloads that volume only, as a file of its own (`book.display_title` then
+overrides the "<title> — Volume N" shown while downloading).
+
 Long running: shows progress and can be cancelled by tapping it.
 `on_done(success, result, reopened)` is called once everything is in place.
 ]]
 function Manager:download_chapters_book(book, target_path, on_done)
     local title = book.name or book.title or _("book")
+    local volume = tonumber(book.volume)
+    if book.display_title then
+        title = book.display_title
+    elseif volume then
+        title = T(_("%1 — Volume %2"), title, ChaptersEpub.format_number(volume))
+    end
     local previous = self:get_chapters_layout(target_path)
     local ok_trapper, Trapper = pcall(require, "ui/trapper")
     local use_trapper = ok_trapper and type(Trapper) == "table" and Trapper.wrap and Trapper.info
@@ -1811,6 +1879,7 @@ function Manager:download_chapters_book(book, target_path, on_done)
         local ok, result, err = pcall(ChaptersBook.build, self.api, {
             book_id = book.id,
             target_path = target_path,
+            volume = volume,
             title = book.name or book.title,
             author = book.author,
             previous_chapter_ids = previous and previous.chapter_ids or nil,
@@ -1856,7 +1925,12 @@ function Manager:update_active_chapters_book()
     end
 
     local title = info.title
-    self:download_chapters_book({ id = layout.book_id, title = title }, info.file, function(success, result, reopened)
+    -- A copy of a single volume is updated as that volume (its title already names it)
+    local book = { id = layout.book_id, title = title }
+    if layout.volume then
+        book = { id = layout.book_id, volume = layout.volume, display_title = title }
+    end
+    self:download_chapters_book(book, info.file, function(success, result, reopened)
         if not success then return end
         local function report()
             utils.show_msg(self:chapters_result_text(result.title or title, result), 4)
