@@ -14,6 +14,7 @@
   - **Flexible Download Paths**: Download directly to your configured default folder or pick a custom folder per book.
   - **Instant Reading & Refresh**: Prompt to open downloaded books immediately upon completion, with automatic File Manager refresh.
   - **Read / Unread Management**: Mark books as read or unread directly from the browser (with `✅` and `📖` status indicators).
+  - **Books Without an EPUB File**: Books the server stores as separate chapters (`📝`, e.g. web novels still being scraped or translated) are downloaded chapter by chapter and assembled into an EPUB on the device, with illustrations, cover and table of contents. Download again (or use **📥 Update Book Chapters from Folio** in the document menu) to fetch only new and changed chapters.
 
 - **🔄 Reading Progress & Status Sync**
   - **Automatic Progress Sync**: Automatically syncs reading position and progress percentage in the background on page turns (throttled) and on document close.

@@ -4,9 +4,9 @@ local utils = require("utils")
 
 local FolioAPI = {}
 
--- FolioSync only handles complete e-book files. Folio also stores books assembled
--- from chapters (kind = "Chapters") that have no downloadable file: catalog
--- requests ask the server for kind = "File" only.
+-- Folio stores complete e-book files (kind = "File") and books assembled from
+-- chapters (kind = "Chapters"). The latter have no downloadable file: the plugin
+-- builds a local EPUB from their chapters (see chapters_book.lua).
 FolioAPI.BOOK_KIND_FILE = "File"
 FolioAPI.BOOK_KIND_CHAPTERS = "Chapters"
 
@@ -41,7 +41,9 @@ local function get_http_client()
 
     local client = {}
 
-    local function do_request(url, method, body, headers)
+    -- opts.quiet: bulk / binary request, keep it out of the info log
+    local function do_request(url, method, body, headers, opts)
+        local quiet = opts and opts.quiet
         local response_body = {}
         local request_params = {
             url    = url,
@@ -74,8 +76,12 @@ local function get_http_client()
             http_driver = sslhttps
         end
 
-        logger.info(string.format("FolioSync API: [HTTP %s] %s%s",
-            method or "GET", url or "nil", body and (" payload=" .. tostring(body)) or ""))
+        if quiet then
+            logger.dbg("FolioSync API: [HTTP " .. tostring(method or "GET") .. "]", url)
+        else
+            logger.info(string.format("FolioSync API: [HTTP %s] %s%s",
+                method or "GET", url or "nil", body and (" payload=" .. tostring(body)) or ""))
+        end
 
         local res, code, resp_headers
         if http_driver then
@@ -97,9 +103,14 @@ local function get_http_client()
         local resp_str = table.concat(response_body)
         local status_num = tonumber(code) or 0
         if status_num >= 200 and status_num < 300 then
-            logger.info(string.format("FolioSync API: [HTTP %s] %s -> HTTP %s (%d bytes)%s",
-                method or "GET", url or "nil", tostring(code), #resp_str,
-                #resp_str > 0 and (" response=" .. resp_str:sub(1, 500)) or ""))
+            if not quiet then
+                logger.info(string.format("FolioSync API: [HTTP %s] %s -> HTTP %s (%d bytes)%s",
+                    method or "GET", url or "nil", tostring(code), #resp_str,
+                    #resp_str > 0 and (" response=" .. resp_str:sub(1, 500)) or ""))
+            end
+        elseif quiet then
+            logger.warn(string.format("FolioSync API: [HTTP %s] %s -> HTTP %s",
+                method or "GET", url or "nil", tostring(code)))
         else
             logger.warn(string.format("FolioSync API: [HTTP %s] %s -> HTTP %s: %s",
                 method or "GET", url or "nil", tostring(code), resp_str:sub(1, 500)))
@@ -114,8 +125,8 @@ local function get_http_client()
         }
     end
 
-    function client.get(url, headers)
-        return do_request(url, "GET", nil, headers)
+    function client.get(url, headers, opts)
+        return do_request(url, "GET", nil, headers, opts)
     end
 
     function client.post(url, body, headers)
@@ -225,7 +236,6 @@ function FolioAPI:browse(series_id, sort_by, offset, limit, search, search_by, c
     if search_by and search_by ~= "" then
         query = query .. "&searchBy=" .. urlencode(search_by)
     end
-    query = query .. "&kind=" .. FolioAPI.BOOK_KIND_FILE
 
     local url = base_url .. "/browse?" .. query
     local http = get_http_client()
@@ -262,6 +272,7 @@ function FolioAPI:list_books(page, limit, search, callback)
     limit = limit or 20
 
     -- The server paginates with offset/limit; `page` is 1-based here.
+    -- Only File books: this list is used to match a local file by its title.
     local offset = math.max(0, (page - 1) * limit)
     local query = string.format("offset=%d&limit=%d&kind=%s", offset, limit, FolioAPI.BOOK_KIND_FILE)
     if search and search ~= "" then
@@ -406,6 +417,65 @@ function FolioAPI:download_book(book_id, save_path, callback)
         if callback then callback(false, msg) end
         return false, msg
     end
+end
+
+-- GET `path` (relative to the server URL) without touching the info log.
+-- Returns true, body | false, message, http_code (code is nil on a network error).
+function FolioAPI:get_raw(path, accept)
+    local http = get_http_client()
+    if not http then
+        return false, "HTTP client unavailable"
+    end
+
+    local headers = self:get_headers()
+    headers["Content-Type"] = nil
+    headers["Accept"] = accept or "*/*"
+
+    local response, err = http.get(self:get_server_url() .. path, headers, { quiet = true })
+    if not response then
+        return false, tostring(err)
+    end
+
+    local code = tonumber(response.code or response.status) or 0
+    if code >= 200 and code < 300 then
+        return true, response.body or response.content or ""
+    end
+    return false, "HTTP " .. tostring(code), code
+end
+
+-- Like get_raw, but decodes a JSON object / array response.
+function FolioAPI:get_json(path)
+    local ok, body, code = self:get_raw(path, "application/json")
+    if not ok then
+        return false, body, code
+    end
+    local ok_json, data = pcall(json.decode, body)
+    if ok_json and type(data) == "table" then
+        return true, data
+    end
+    return false, "Unexpected server response"
+end
+
+-- One page of the chapter list of a Chapters book (summaries without content),
+-- in reading order: { items = {...}, more = bool, total = n }.
+function FolioAPI:list_chapters(book_id, offset, limit)
+    return self:get_json(string.format("/books/%s/chapters?offset=%d&limit=%d",
+        tostring(book_id), offset or 0, limit or 100))
+end
+
+-- A chapter with its content paragraphs.
+function FolioAPI:get_chapter(book_id, chapter_id)
+    return self:get_json(string.format("/books/%s/chapters/%s", tostring(book_id), tostring(chapter_id)))
+end
+
+-- Bytes of a chapter illustration (file names come from the chapter content).
+function FolioAPI:get_book_image(book_id, filename)
+    return self:get_raw(string.format("/books/%s/images/%s", tostring(book_id), urlencode(filename)))
+end
+
+-- Bytes of the book cover.
+function FolioAPI:get_book_cover(book_id)
+    return self:get_raw(string.format("/books/%s/cover", tostring(book_id)))
 end
 
 function FolioAPI:get_progress(book_id, callback)

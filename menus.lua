@@ -50,6 +50,16 @@ function Menus:get_menu_structure()
                     self.plugin.manager:sync_annotations_and_bookmarks(self.plugin:get_ui(), nil, true)
                 end,
             })
+            if self.plugin.ui and self.plugin.ui.document
+                and self.plugin.manager:get_chapters_layout(self.plugin.ui.document.file) then
+                -- The open book was assembled from Folio chapters (no EPUB file on the server)
+                table.insert(items, {
+                    text = _("📥 Update Book Chapters from Folio"),
+                    callback = function()
+                        self.plugin.manager:update_active_chapters_book()
+                    end,
+                })
+            end
             if self.plugin.ui and self.plugin.ui.document then
                 table.insert(items, {
                     text = _("✓ Toggle Read Status on Folio"),
@@ -279,7 +289,8 @@ function Menus:toggle_active_doc_read_status()
             return
         end
 
-        self.api:update_progress(book_id, info.location, info.percent, target_read, function(success)
+        local location = self.plugin.manager:outgoing_location(info)
+        self.api:update_progress(book_id, location, info.percent, target_read, function(success)
             self.plugin.manager:set_local_read_status(info, target_read, info.docsettings)
             if success then
                 local msg = target_read and _("Marked as read on Folio and device.")

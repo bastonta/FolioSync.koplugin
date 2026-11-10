@@ -169,13 +169,29 @@ msgid "📁 Choose custom download folder..."
 msgstr ""
 
 #: browser.lua
-msgid "📝 Assembled from chapters — no EPUB file to download"
+msgid "Another book already uses the file name '%1' in '%2'."
 msgstr ""
 
 #: browser.lua
 msgid ""
-"This book is assembled from chapters on the server and has no EPUB file. "
-"Read it in the Folio web client or compile it to EPUB there first."
+"'%1' is already on this device. Update it from Folio?\n"
+"\n"
+"Only new and changed chapters are downloaded."
+msgstr ""
+
+#: browser.lua
+msgid ""
+"Download '%1' to '%2'?\n"
+"\n"
+"This book has no EPUB file yet: it will be assembled on this device from its chapters."
+msgstr ""
+
+#: browser.lua
+msgid "Update"
+msgstr ""
+
+#: browser.lua
+msgid "Do you want to open it now?"
 msgstr ""
 
 #: browser.lua:534
@@ -684,4 +700,72 @@ msgstr ""
 
 #: update_checker.lua:1272
 msgid "You are running a development version of FolioSync (%1)"
+msgstr ""
+
+#: manager.lua
+msgid "The reading position on Folio is in a chapter this copy does not have yet. Update the book chapters from Folio."
+msgstr ""
+
+#: manager.lua
+msgid "Download cancelled."
+msgstr ""
+
+#: manager.lua
+msgid "This book has no chapters on the server yet."
+msgstr ""
+
+#: manager.lua
+msgid "The Folio server does not let API keys read chapters. Update the Folio server."
+msgstr ""
+
+#: manager.lua
+msgid "Another book already uses this file name in the download folder."
+msgstr ""
+
+#: manager.lua
+msgid "'%1' downloaded: %2 chapters."
+msgstr ""
+
+#: manager.lua
+msgid "'%1' is up to date: %2 chapters."
+msgstr ""
+
+#: manager.lua
+msgid "'%1' updated: %2 new or changed chapters, %3 in total."
+msgstr ""
+
+#: manager.lua
+msgid ""
+"Downloading '%1'\n"
+"Chapters: %2 / %3"
+msgstr ""
+
+#: manager.lua
+msgid ""
+"Downloading '%1'\n"
+"Illustrations: %2 / %3"
+msgstr ""
+
+#: manager.lua
+msgid "Building '%1'…"
+msgstr ""
+
+#: manager.lua
+msgid "Download paused"
+msgstr ""
+
+#: manager.lua
+msgid "Cancel download"
+msgstr ""
+
+#: manager.lua
+msgid "Continue"
+msgstr ""
+
+#: manager.lua
+msgid "This book was not assembled from Folio chapters."
+msgstr ""
+
+#: menus.lua
+msgid "📥 Update Book Chapters from Folio"
 msgstr ""

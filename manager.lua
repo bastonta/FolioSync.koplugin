@@ -4,6 +4,7 @@ local T = require("ffi/util").template
 local Event = require("ui/event")
 local logger = require("logger")
 local annotations_helper = require("annotations")
+local ChaptersBook = require("chapters_book")
 local utils = require("utils")
 
 local Manager = {}
@@ -412,6 +413,17 @@ function Manager:resolve_book_id(ui_or_doc, callback_or_doc, maybe_callback)
     -- Invalidate sync state so next sync starts as initial merge (safe merge)
     self:invalidate_sync_state(info.file or info.file_path)
 
+    -- 1b. A book assembled on this device from Folio chapters knows its book id
+    -- (its file exists nowhere on the server, so the hash would never match)
+    local layout = self:get_chapters_layout(info.file)
+    if layout and layout.book_id then
+        if info.docsettings and info.docsettings.saveSetting then
+            info.docsettings:saveSetting("folio_book_id", layout.book_id)
+        end
+        if callback then callback(layout.book_id) end
+        return layout.book_id
+    end
+
     -- 2. Try to match by file hash via Folio API
     local file_hash = self:compute_file_hash(info.file)
     if file_hash then
@@ -453,6 +465,30 @@ function Manager:resolve_book_id_by_info(info, callback)
     end)
 end
 
+-- Chapter layout of a book assembled on this device from Folio chapters (a `Chapters`
+-- book); nil for regular files. Cached: it is consulted on every progress sync.
+function Manager:get_chapters_layout(file_path)
+    if type(file_path) ~= "string" or file_path == "" then return nil end
+    self._chapters_layouts = self._chapters_layouts or {}
+    local cached = self._chapters_layouts[file_path]
+    if cached == nil then
+        local ok, layout = pcall(ChaptersBook.load_layout, file_path)
+        cached = (ok and layout) or false
+        self._chapters_layouts[file_path] = cached
+    end
+    return cached or nil
+end
+
+-- Location to send to the server for the current reading position. The server knows the
+-- position of a Chapters book only as `ch:<chapterId>`; nil means "percentage only".
+function Manager:outgoing_location(info)
+    local layout = self:get_chapters_layout(info.file or info.file_path)
+    if not layout then
+        return info.location
+    end
+    return ChaptersBook.outgoing_location(layout, info.location)
+end
+
 -- Synchronize reading progress for current document
 function Manager:sync_progress(ui, document, is_silent)
     if not self.api:has_auth() then
@@ -476,7 +512,7 @@ function Manager:sync_progress(ui, document, is_silent)
         end
 
         local percent = info.percent
-        local location = info.location
+        local location = self:outgoing_location(info)
         local is_read = self:get_doc_read_status(info)
 
         -- Fetch remote progress first
@@ -493,9 +529,19 @@ function Manager:sync_progress(ui, document, is_silent)
                     is_read = true
                 end
 
+                local remote_ahead = remote_percent > percent + 0.1
+                local layout = self:get_chapters_layout(info.file or info.file_path)
+                if layout then
+                    -- Chapters book: compare chapters, percentages differ between clients
+                    local ahead = ChaptersBook.remote_is_ahead(layout, remote_data.location, info.location)
+                    if ahead ~= nil then
+                        remote_ahead = ahead
+                    end
+                end
+
                 -- Do not overwrite remote progress if remote is ahead and local is not marked as read,
                 -- UNLESS the remote progress matches our own last push in this session (local rollback/correction)
-                if not is_read and (remote_percent > percent + 0.1) then
+                if not is_read and remote_ahead then
                     local my_last_pushed = self._last_pushed_percent and self._last_pushed_percent[book_id]
                     if my_last_pushed and math.abs(remote_percent - my_last_pushed) < 0.2 then
                         should_push = true
@@ -1209,7 +1255,7 @@ function Manager:push_all_data(ui, document, force_manual)
         end
 
         local percent = info.percent
-        local location = info.location
+        local location = self:outgoing_location(info)
         local is_read = self:get_doc_read_status(info)
 
         self.api:update_progress(book_id, location, percent, is_read, function(push_prog_ok)
@@ -1491,7 +1537,20 @@ function Manager:pull_progress(ui, document, force_manual, callback)
                     self.ui
                 local target_doc = info.document or (target_ui and target_ui.document) or document
 
-                if (remote_pos and remote_pos ~= "") or (remote_percent and remote_percent > 0) then
+                local layout = self:get_chapters_layout(info.file or info.file_path)
+                if layout then
+                    -- Chapters book: the server position is a chapter reference
+                    if remote_pos and remote_pos ~= "" then
+                        local kind, xpointer = ChaptersBook.incoming_location(layout, remote_pos, info.location)
+                        if kind == "at" then
+                            -- No percentage fallback: it is counted differently by every client
+                            self:goto_location(target_ui, xpointer, nil, info.total_pages, target_doc, info.title, info)
+                        elseif kind == "unknown" then
+                            self:notify_missing_chapter(info.file or info.file_path)
+                        end
+                        -- "same": already in that chapter, the local position is more precise
+                    end
+                elseif (remote_pos and remote_pos ~= "") or (remote_percent and remote_percent > 0) then
                     self:goto_location(target_ui, remote_pos, remote_percent, info.total_pages, target_doc, info.title, info)
                 end
 
@@ -1511,6 +1570,15 @@ function Manager:pull_progress(ui, document, force_manual, callback)
             if callback then callback(prog_ok) end
         end)
     end)
+end
+
+-- The server position is in a chapter the local copy does not have: tell the user once
+-- per opened book that the copy needs an update.
+function Manager:notify_missing_chapter(file_path)
+    self._missing_chapter_notified = self._missing_chapter_notified or {}
+    if self._missing_chapter_notified[file_path] then return end
+    self._missing_chapter_notified[file_path] = true
+    utils.show_msg(_("The reading position on Folio is in a chapter this copy does not have yet. Update the book chapters from Folio."), 5)
 end
 
 -- Fetch/pull all data (progress + annotations + bookmarks) for current document from Folio
@@ -1548,6 +1616,257 @@ function Manager:pull_all_data(ui, document, force_manual, callback)
             end
             if callback then callback(prog_ok and annos_ok) end
         end)
+    end)
+end
+
+-- ================= CHAPTERS BOOKS =================
+
+local function same_file(path_a, path_b)
+    if not path_a or not path_b then return false end
+    if path_a == path_b then return true end
+    local ok, equal = pcall(function()
+        local ffiutil = require("ffi/util")
+        local real_a, real_b = ffiutil.realpath(path_a), ffiutil.realpath(path_b)
+        return real_a ~= nil and real_a == real_b
+    end)
+    return ok and equal == true
+end
+
+-- Message for a failed download of a Chapters book
+local function chapters_error_text(err)
+    if err == ChaptersBook.ERR_CANCELLED then
+        return _("Download cancelled.")
+    elseif err == ChaptersBook.ERR_NO_CHAPTERS then
+        return _("This book has no chapters on the server yet.")
+    elseif err == ChaptersBook.ERR_FORBIDDEN then
+        return _("The Folio server does not let API keys read chapters. Update the Folio server.")
+    elseif err == ChaptersBook.ERR_NAME_TAKEN then
+        return _("Another book already uses this file name in the download folder.")
+    end
+    return T(_("Failed to download book: %1"), tostring(err))
+end
+
+-- What a finished download did, for the user
+function Manager:chapters_result_text(title, result)
+    if not result.updated then
+        return T(_("'%1' downloaded: %2 chapters."), title, result.chapters_total)
+    elseif result.chapters_fetched == 0 then
+        return T(_("'%1' is up to date: %2 chapters."), title, result.chapters_total)
+    end
+    return T(_("'%1' updated: %2 new or changed chapters, %3 in total."), title,
+        result.chapters_fetched, result.chapters_total)
+end
+
+-- Chapters that changed their place in the book take the reading position, the
+-- annotations and the sync snapshot with them.
+function Manager:remap_chapter_positions(file_path, moved)
+    pcall(function()
+        local DocSettings = require("docsettings")
+        if DocSettings.hasSidecarFile and not DocSettings:hasSidecarFile(file_path) then
+            return
+        end
+        local docsettings = DocSettings:open(file_path)
+        if ChaptersBook.remap_docsettings(docsettings, moved) and docsettings.flush then
+            docsettings:flush()
+        end
+    end)
+
+    local state = self:load_sync_state(file_path)
+    if ChaptersBook.remap_sync_state(state, moved) then
+        self:save_sync_state(state, file_path)
+    end
+end
+
+-- Puts a built EPUB in place. When the book is open in the reader, the file is swapped
+-- while the reader is closed and the book is opened again.
+-- Returns ok, error, reopened.
+function Manager:install_chapters_build(result)
+    if result.unchanged then
+        -- The copy on the device is current: nothing to swap, nothing to reopen
+        self._chapters_layouts = {}
+        return ChaptersBook.commit(result), nil, false
+    end
+
+    local function install()
+        local ok, err = ChaptersBook.commit(result)
+        if not ok then
+            return false, err
+        end
+        self._chapters_layouts = {}
+        if result.has_moved then
+            self:remap_chapter_positions(result.target_path, result.moved)
+        end
+        return true
+    end
+
+    local ok_reader, ReaderUI = pcall(require, "apps/reader/readerui")
+    local reader = ok_reader and type(ReaderUI) == "table" and ReaderUI.instance or nil
+    if reader and reader.document and reader.reloadDocument and same_file(reader.document.file, result.target_path) then
+        local installed, err
+        result.target_path = reader.document.file
+        reader:reloadDocument(function()
+            installed, err = install()
+        end)
+        return installed == true, err, true
+    end
+
+    local installed, err = install()
+    return installed, err, false
+end
+
+-- A book file was downloaded to `file_path`. It may have replaced a copy assembled from
+-- chapters (the book got its EPUB on the server, which is another book there): what the
+-- sidecar knew about the old file must not be applied to the new one.
+function Manager:relink_downloaded_file(file_path, book_id)
+    self._chapters_layouts = {}
+    local layout_path = ChaptersBook.layout_path(file_path)
+    if layout_path then os.remove(layout_path) end
+
+    pcall(function()
+        local DocSettings = require("docsettings")
+        if not (DocSettings.hasSidecarFile and DocSettings:hasSidecarFile(file_path)) then
+            return
+        end
+        local docsettings = DocSettings:open(file_path)
+        local stored_id = docsettings:readSetting("folio_book_id")
+        if stored_id and stored_id ~= book_id then
+            docsettings:saveSetting("folio_book_id", book_id)
+            docsettings:flush()
+            self:invalidate_sync_state(file_path)
+        end
+    end)
+end
+
+--[[--
+Downloads a Folio `Chapters` book (a book that has no EPUB file on the server) chapter by
+chapter and assembles it into a local EPUB at `target_path`; a copy that is already there
+is updated with the new and changed chapters.
+
+Long running: shows progress and can be cancelled by tapping it.
+`on_done(success, result, reopened)` is called once everything is in place.
+]]
+function Manager:download_chapters_book(book, target_path, on_done)
+    local title = book.name or book.title or _("book")
+    local previous = self:get_chapters_layout(target_path)
+    local ok_trapper, Trapper = pcall(require, "ui/trapper")
+    local use_trapper = ok_trapper and type(Trapper) == "table" and Trapper.wrap and Trapper.info
+
+    local function finish(result, err)
+        if not result then
+            utils.show_msg(chapters_error_text(err), 5)
+            if on_done then on_done(false, err) end
+            return
+        end
+        local installed, install_err, reopened = self:install_chapters_build(result)
+        if not installed then
+            utils.show_msg(chapters_error_text(install_err), 5)
+            if on_done then on_done(false, install_err) end
+            return
+        end
+        UIManager:broadcastEvent(Event:new("Refresh"))
+        if on_done then on_done(true, result, reopened) end
+    end
+
+    local job
+    local function start()
+        if use_trapper then
+            Trapper:wrap(job)
+        else
+            job()
+        end
+    end
+
+    job = function()
+        local last_phase, last_shown = nil, 0
+        local function on_progress(phase, done, total)
+            -- Every update costs an e-ink refresh: show phase changes, then one every 2 s
+            local now = os.time()
+            if phase == last_phase and done < total and (now - last_shown) < 2 then
+                return true
+            end
+            last_phase, last_shown = phase, now
+
+            local text
+            if phase == "chapters" then
+                text = T(_("Downloading '%1'\nChapters: %2 / %3"), title, done, total)
+            elseif phase == "images" then
+                text = T(_("Downloading '%1'\nIllustrations: %2 / %3"), title, done, total)
+            else
+                text = T(_("Building '%1'…"), title)
+            end
+            if use_trapper then
+                -- false when the user tapped the message and chose to stop
+                return Trapper:info(text) ~= false
+            end
+            return true
+        end
+
+        if use_trapper then
+            if Trapper.setPausedText then
+                Trapper:setPausedText(_("Download paused"), _("Cancel download"), _("Continue"))
+            end
+            -- Shown while the chapter list is being loaded
+            Trapper:info(T(_("Downloading '%1'..."), title))
+        end
+        local ok, result, err = pcall(ChaptersBook.build, self.api, {
+            book_id = book.id,
+            target_path = target_path,
+            title = book.name or book.title,
+            author = book.author,
+            previous_chapter_ids = previous and previous.chapter_ids or nil,
+            on_progress = on_progress,
+        })
+        if not ok then
+            logger.warn("FolioSync: chapters download failed:", result)
+            os.remove(target_path .. ".tmp")
+            result, err = nil, result
+        end
+        if use_trapper and Trapper.reset then
+            Trapper:reset()
+        end
+
+        -- Leave the job's coroutine before touching the reader
+        if UIManager.nextTick then
+            UIManager:nextTick(function() finish(result, err) end)
+        else
+            finish(result, err)
+        end
+    end
+
+    -- Let the dialog or menu that started the download close first
+    if UIManager.nextTick then
+        UIManager:nextTick(start)
+    else
+        start()
+    end
+end
+
+-- Updates the open book with the chapters added or changed on the server.
+function Manager:update_active_chapters_book()
+    local ui = self.plugin and self.plugin.get_ui and self.plugin:get_ui() or self.ui
+    local info = self:get_doc_info(ui, ui and ui.document)
+    local layout = info and self:get_chapters_layout(info.file)
+    if not layout then
+        utils.show_msg(_("This book was not assembled from Folio chapters."))
+        return
+    end
+    if not self.api:has_auth() then
+        utils.show_msg(_("Please set API Key in settings."))
+        return
+    end
+
+    local title = info.title
+    self:download_chapters_book({ id = layout.book_id, title = title }, info.file, function(success, result, reopened)
+        if not success then return end
+        local function report()
+            utils.show_msg(self:chapters_result_text(result.title or title, result), 4)
+        end
+        if reopened and UIManager.scheduleIn then
+            -- The book is being opened again: let the reader settle first
+            UIManager:scheduleIn(2, report)
+        else
+            report()
+        end
     end)
 end
 

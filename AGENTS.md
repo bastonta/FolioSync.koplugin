@@ -18,6 +18,8 @@ FolioSync.koplugin/
 ├── manager.lua               # Document lifecycle coordinator: onDocumentOpen, onDocumentClose, sync triggers
 ├── folio_api.lua             # HTTP REST API client: X-API-Key auth, books, progress, annotations, stats
 ├── browser.lua               # Remote library browser UI: series tree, search, sorting, downloader
+├── chapters_book.lua         # Chapters books: chapter-by-chapter download/update, chapter layout, `ch:<id>` position translation
+├── chapters_epub.lua         # EPUB 3 builder for Chapters books (markdown-ish paragraphs → XHTML, nav, OPF, manifest)
 ├── annotations.lua           # Converter between KOReader bookmark/highlight models & Folio REST format
 ├── menus.lua                 # KOReader Tools menu builder (⚙️ Settings, 📚 Browse, 🔄 Sync)
 ├── update_checker.lua        # In-app GitHub release updater & zip extractor
@@ -29,6 +31,7 @@ FolioSync.koplugin/
 ├── spec/                     # Unit test suites executed with Busted
 │   └── unit/
 │       ├── folio_sync_spec.lua      # Extensive mocks & conversion/API/manager tests
+│       ├── chapters_spec.lua        # Chapters books: EPUB builder, download/update, position translation
 │       └── update_checker_spec.lua  # Release parser & version comparison tests
 ├── Makefile                  # Build tasks: compile gettext translations & generate release zips
 ├── po2mo.py                  # Python script for compiling PO to MO without external gettext tools
@@ -56,7 +59,15 @@ FolioSync.koplugin/
   - Stored inside the book's sidecar directory (`<book>.sdr/folio_sync_state.json`).
   - Records the last synced hash and snapshot of annotations/bookmarks to prevent redundant network requests and safely detect local vs. remote deletions without data loss.
 
-### C. E-Ink Device Constraints & Defensive Programming
+### C. Books Without a File (`Chapters` Kind)
+
+- Folio stores some books as separate chapters (`kind = "Chapters"`); they have no file and `/download` answers `409`. The plugin downloads the chapters (`GET /books/{id}/chapters`, `/chapters/{chapterId}`, `/images/{file}`, `/cover`) and builds a local EPUB (`chapters_book.lua`, `chapters_epub.lua`). The layout mirrors the FolioReader builder and the server compiler: one `ch-<chapterId>.xhtml` per chapter, nothing but chapters in the spine, and `META-INF/folio-chapters.json` listing what the file holds.
+- **Updates** rebuild the file into `<book>.epub.tmp`, copying unchanged chapters and illustrations from the previous build (needs `ffi/archiver`, KOReader 2025.04+; older versions download everything again), then rename it over the book. An open book is swapped through `ReaderUI:reloadDocument`.
+- **Matching**: such a file exists nowhere on the server, so it is linked by `<book>.sdr/folio_chapters.json` (book id, chapter order, file size) or by the manifest inside the EPUB, never by hash.
+- **Reading position**: the server keeps it as `ch:<chapterId>` (no XPointer conversion). `DocFragment[N]` of a local XPointer is the N-th chapter: pushes send the chapter, pulls open the chapter start unless the reader is already in that chapter. When chapters move, `last_xpointer`, annotations and the sync snapshot are remapped.
+- Long downloads run under `Trapper` (progress messages, tap to pause / cancel); progress updates are throttled because each one costs an e-ink refresh.
+
+### D. E-Ink Device Constraints & Defensive Programming
 
 - **Never Block the Main UI Thread**: Long-running or network-bound tasks must yield or use non-blocking feedback (`InfoMessage` or `ConfirmBox`).
 - **Pcall Wrapping**: Wrap all network calls, JSON decoding, and filesystem writes with `pcall` to ensure an API error or network drop never crashes KOReader.

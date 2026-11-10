@@ -193,7 +193,10 @@ end
 -- Compare whether two annotations match by location / position
 function M.is_same_annotation(item_a, item_b)
     if not item_a or not item_b then return false end
-    if item_a.folio_id and item_b.folio_id and item_a.folio_id == item_b.folio_id then
+    -- Local items and snapshots carry the server id as `folio_id`, server items as `id`
+    local id_a = item_a.folio_id or item_a.id
+    local id_b = item_b.folio_id or item_b.id
+    if id_a and id_b and id_a == id_b then
         return true
     end
     local pos_a = type(item_a.pos0) == "string" and item_a.pos0 or item_a.locationStart or
@@ -230,7 +233,10 @@ end
 -- Compare whether two bookmarks match by location / position or folio_id
 function M.is_same_bookmark(item_a, item_b)
     if not item_a or not item_b then return false end
-    if item_a.folio_id and item_b.folio_id and item_a.folio_id == item_b.folio_id then
+    -- Local items and snapshots carry the server id as `folio_id`, server items as `id`
+    local id_a = item_a.folio_id or item_a.id
+    local id_b = item_b.folio_id or item_b.id
+    if id_a and id_b and id_a == id_b then
         return true
     end
     local pos_a = type(item_a.pos0) == "string" and item_a.pos0 or item_a.location or item_a.locationStart or

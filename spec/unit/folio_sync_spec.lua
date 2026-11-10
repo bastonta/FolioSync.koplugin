@@ -1596,7 +1596,7 @@ describe("FolioSync Book Kinds (File vs Chapters)", function()
         assert.is_false(FolioAPI.is_chapters_book(nil))
     end)
 
-    it("asks the server for File books only when browsing and listing", function()
+    it("browses books of every kind and matches local files against File books only", function()
         local requested_urls = {}
         local FolioAPI = install_http(function(req)
             table.insert(requested_urls, req.url)
@@ -1604,9 +1604,10 @@ describe("FolioSync Book Kinds (File vs Chapters)", function()
         end)
         local api = FolioAPI:new({ server_url = "http://localhost:8080", api_key = "key123" })
 
+        -- The catalog lists Chapters books too: they are assembled on the device
         api:browse(nil, "name", 0, 15)
         assert.is_truthy(requested_urls[1]:find("/browse?", 1, true))
-        assert.is_truthy(requested_urls[1]:find("kind=File", 1, true))
+        assert.is_nil(requested_urls[1]:find("kind=", 1, true))
 
         -- list_books paginates with offset/limit on the server side
         api:list_books(3, 10, "Dune")
@@ -1631,7 +1632,7 @@ describe("FolioSync Book Kinds (File vs Chapters)", function()
         assert.is_truthy(tostring(msg):find("assembled from chapters", 1, true))
     end)
 
-    it("browser hides download actions for Chapters books", function()
+    it("browser offers download actions for Chapters books and assembles them from chapters", function()
         local FolioAPI = install_http(function() return "{}", 200, {} end)
         local shown = {}
         package.loaded["ui/uimanager"].show = function(self, widget)
@@ -1645,24 +1646,24 @@ describe("FolioSync Book Kinds (File vs Chapters)", function()
             paths = {},
         }, { __index = FolioBrowser })
 
-        browser:on_book_selected({ id = "c1", name = "Chapters Book", kind = "Chapters" })
-        local menu = shown[#shown]
-        assert.is_not_nil(menu)
-        for _, entry in ipairs(menu.item_table) do
-            assert.is_nil(tostring(entry.text):find("Download to default folder", 1, true))
-            assert.is_nil(tostring(entry.text):find("Choose custom download folder", 1, true))
+        for _, book in ipairs({
+            { id = "c1", name = "Chapters Book", kind = "Chapters" },
+            { id = "f1", name = "File Book", kind = "File" },
+        }) do
+            shown = {}
+            browser:on_book_selected(book)
+            local menu = shown[#shown]
+            assert.is_not_nil(menu)
+            assert.is_truthy(tostring(menu.item_table[1].text):find("Download to default folder", 1, true))
+            assert.is_truthy(tostring(menu.item_table[2].text):find("Choose custom download folder", 1, true))
         end
 
-        shown = {}
-        browser:on_book_selected({ id = "f1", name = "File Book", kind = "File" })
-        menu = shown[#shown]
-        assert.is_truthy(tostring(menu.item_table[1].text):find("Download to default folder", 1, true))
-
-        -- start_download refuses Chapters books before any network call
-        shown = {}
+        -- start_download hands a Chapters book over to the chapter-by-chapter download
+        local routed
+        browser.start_chapters_download = function(_, book, dir) routed = { book = book, dir = dir } end
         browser:start_download({ id = "c1", name = "Chapters Book", kind = "Chapters" }, "/mnt/books")
-        assert.is_equal(1, #shown)
-        assert.is_truthy(tostring(shown[1].text):find("no EPUB file", 1, true))
+        assert.is_equal("c1", routed.book.id)
+        assert.is_equal("/mnt/books", routed.dir)
     end)
 end)
 

@@ -7,6 +7,7 @@ local Menu = require("ui/widget/menu")
 local T = require("ffi/util").template
 local utils = require("utils")
 local FolioAPI = require("folio_api")
+local ChaptersBook = require("chapters_book")
 
 local FolioBrowser = Menu:extend {
     current_series_id = nil,
@@ -124,8 +125,8 @@ function FolioBrowser:fetch_items(append)
             else
                 local is_read = item.progress and (item.progress.isRead or item.progress.is_read)
                 local prefix = is_read and "✅ " or "📖 "
-                if FolioAPI.is_chapters_book(item) then
-                    -- Should not happen (browse asks for kind=File), but mark it visibly
+                if FolioAPI.is_chapters_book(item) and not is_read then
+                    -- No EPUB file on the server yet: assembled on the device from chapters
                     prefix = "📝 "
                 end
                 local author = item.author or ""
@@ -517,29 +518,23 @@ function FolioBrowser:on_book_selected(book)
     local book_title = book.name or book.title or "book"
     local default_dir = self.plugin.settings.download_dir
     local is_read = book.progress and (book.progress.isRead or book.progress.is_read)
-    local has_file = not FolioAPI.is_chapters_book(book)
 
+    -- Books without an EPUB file on the server (Chapters kind) get the same actions:
+    -- start_download assembles a local EPUB from their chapters.
     local menu
     local item_table = {}
-    if has_file then
-        table.insert(item_table, {
-            text = T(_("📥 Download to default folder (%1)"), default_dir),
-            callback = function()
-                self:start_download(book, default_dir)
-            end,
-        })
-        table.insert(item_table, {
-            text = _("📁 Choose custom download folder..."),
-            callback = function()
-                self:prompt_custom_download_dir(book, default_dir)
-            end,
-        })
-    else
-        table.insert(item_table, {
-            text = _("📝 Assembled from chapters — no EPUB file to download"),
-            enabled = false,
-        })
-    end
+    table.insert(item_table, {
+        text = T(_("📥 Download to default folder (%1)"), default_dir),
+        callback = function()
+            self:start_download(book, default_dir)
+        end,
+    })
+    table.insert(item_table, {
+        text = _("📁 Choose custom download folder..."),
+        callback = function()
+            self:prompt_custom_download_dir(book, default_dir)
+        end,
+    })
 
     if is_read then
         table.insert(item_table, {
@@ -640,11 +635,7 @@ end
 
 function FolioBrowser:start_download(book, download_dir)
     if FolioAPI.is_chapters_book(book) then
-        UIManager:show(InfoMessage:new {
-            text = _("This book is assembled from chapters on the server and has no EPUB file. Read it in the Folio web client or compile it to EPUB there first."),
-            timeout = 5,
-        })
-        return
+        return self:start_chapters_download(book, download_dir)
     end
     local book_title = book.name or book.title or "book"
     local clean_title = utils.sanitize_filename(book_title)
@@ -684,6 +675,9 @@ function FolioBrowser:start_download(book, download_dir)
 
             self.api:download_book(book.id, target_path, function(success, res)
                 if success then
+                    if self.plugin.manager and self.plugin.manager.relink_downloaded_file then
+                        self.plugin.manager:relink_downloaded_file(target_path, book.id)
+                    end
                     -- Trigger a filemanager refresh so the downloaded book appears immediately
                     local Event = require("ui/event")
                     UIManager:broadcastEvent(Event:new("Refresh"))
@@ -705,6 +699,64 @@ function FolioBrowser:start_download(book, download_dir)
                         timeout = 4,
                     })
                 end
+            end)
+        end,
+    }
+    UIManager:show(confirm)
+end
+
+-- A book that has no EPUB file on the server yet (Chapters kind): it is downloaded chapter
+-- by chapter and assembled into a local EPUB. A copy that is already on the device is
+-- updated with the new and changed chapters.
+function FolioBrowser:start_chapters_download(book, download_dir)
+    local book_title = book.name or book.title or "book"
+    local clean_title = utils.sanitize_filename(book_title)
+    local clean_author = utils.sanitize_filename(book.author or "")
+    local stem = clean_author ~= "" and (clean_title .. " - " .. clean_author) or clean_title
+
+    local series_path = self:resolve_series_path(book)
+    local target_dir = utils.build_book_target_dir(download_dir, series_path)
+
+    local target_path, existing = ChaptersBook.resolve_target(target_dir, stem, book.id)
+    if not target_path then
+        UIManager:show(InfoMessage:new {
+            text = T(_("Another book already uses the file name '%1' in '%2'."), stem .. ".epub", target_dir),
+            timeout = 5,
+        })
+        return
+    end
+
+    local confirm_text
+    if existing then
+        confirm_text = T(_("'%1' is already on this device. Update it from Folio?\n\nOnly new and changed chapters are downloaded."), book_title)
+    else
+        confirm_text = T(_("Download '%1' to '%2'?\n\nThis book has no EPUB file yet: it will be assembled on this device from its chapters."), book_title, target_dir)
+    end
+
+    local confirm = ConfirmBox:new {
+        text = confirm_text,
+        ok_text = existing and _("Update") or _("Download"),
+        cancel_text = _("Cancel"),
+        ok_callback = function()
+            utils.ensure_dir(target_dir)
+
+            self.plugin.manager:download_chapters_book(book, target_path, function(success, result, reopened)
+                -- Failures are reported by the manager; a book that was open is open again
+                if not success or reopened then return end
+
+                local summary = self.plugin.manager:chapters_result_text(book_title, result)
+                local open_box = ConfirmBox:new {
+                    text = summary .. "\n\n" .. _("Do you want to open it now?"),
+                    ok_text = _("Open Book"),
+                    cancel_text = _("Close"),
+                    ok_callback = function()
+                        local Event = require("ui/event")
+                        local ReaderUI = require("apps/reader/readerui")
+                        UIManager:broadcastEvent(Event:new("SetupShowReader"))
+                        ReaderUI:showReader(result.target_path)
+                    end,
+                }
+                UIManager:show(open_box)
             end)
         end,
     }
