@@ -804,6 +804,36 @@ describe("Chapters book reading position", function()
         assert.is_equal("other", (ChaptersBook.incoming_location(layout, function() end, in_b)))
     end)
 
+    it("rescales the percentage when the chapter list changes", function()
+        -- Finished the last of 100 chapters, 100 more arrived
+        assert.is_equal(50, ChaptersBook.rescale_percent(100, 99, 100, 99, 200))
+        -- Halfway through chapter 3 of 4 (62.5 %), one chapter inserted before it
+        assert.is_equal(70, ChaptersBook.rescale_percent(62.5, 2, 4, 3, 5))
+        -- Chapters removed after the position
+        assert.is_equal(50, ChaptersBook.rescale_percent(25, 0, 4, 0, 2))
+        assert.is_equal(40, ChaptersBook.rescale_percent(40, 0, 0, 0, 10))
+
+        local store = {
+            last_xpointer = "/body/DocFragment[2]/body/section/p[9]/text().0",
+            percent_finished = 1.0,
+            summary = { status = "complete" },
+        }
+        local docsettings = {
+            readSetting = function(_, key) return store[key] end,
+            saveSetting = function(_, key, value) store[key] = value end,
+        }
+        local result = ChaptersBook.rescale_docsettings(docsettings, { "a", "b" }, { "a", "b", "c", "d" })
+        assert.is_equal(50, result.percent)
+        assert.is_true(result.unfinished)
+        assert.is_equal(0.5, store.percent_finished)
+        assert.is_equal("reading", store.summary.status)
+
+        -- Nothing changed for this position, a new copy, a chapter the old build lacked
+        assert.is_nil(ChaptersBook.rescale_docsettings(docsettings, { "a", "b", "c", "d" }, { "a", "b", "c", "d" }))
+        assert.is_nil(ChaptersBook.rescale_docsettings(docsettings, nil, { "a", "b" }))
+        assert.is_nil(ChaptersBook.rescale_docsettings(docsettings, { "a", "c" }, { "a", "b" }))
+    end)
+
     it("moves stored positions along with their chapters", function()
         local store = {
             last_xpointer = "/body/DocFragment[3]/body/section/p[2]/text().4",
@@ -1231,6 +1261,52 @@ describe("Manager with a Chapters book", function()
             mgr:chapters_result_text("Novel", done.result))
         assert.are.same({ "ch-a", "ch-b", "ch-c" }, mgr:get_chapters_layout(target).chapter_ids)
 
+        -- Finished the book (the end of chapter 3 of 3, the server has this position);
+        -- three more chapters arrive: 50 %, being read again, sent right away dated just
+        -- after the server's row
+        local store = {
+            last_xpointer = "/body/DocFragment[3]/body/section/p[1]/text().0",
+            percent_finished = 1.0,
+            summary = { status = "complete" },
+            folio_progress = { at = 1, server = "2026-11-12T10:00:00.000Z", read = true },
+        }
+        package.loaded["docsettings"] = {
+            hasSidecarFile = function() return true end,
+            open = function()
+                return {
+                    data = store,
+                    readSetting = function(_, key) return store[key] end,
+                    saveSetting = function(_, key, value) store[key] = value end,
+                    flush = function() end,
+                }
+            end,
+        }
+        finally(function() package.loaded["docsettings"] = nil end)
+        local pushed = {}
+        api.update_progress = function(_, id, location, percent, is_read, cb, opts)
+            pushed[#pushed + 1] = { id = id, location = location, percent = percent, is_read = is_read,
+                updated_at = opts and opts.updated_at }
+            if cb then cb(true, { applied = true, updatedAt = opts and opts.updated_at, isRead = false }) end
+        end
+        mgr.refresh_volume_scope = function() return true end
+        for n, id in ipairs({ "ch-d", "ch-e", "ch-f" }) do
+            api.chapters[3 + n] = chapter(id, 3 + n, "More", "more")
+        end
+        mgr:download_chapters_book({ id = BOOK_ID, name = "Novel" }, target, function(success, result)
+            done = { success = success, result = result }
+        end)
+        assert.is_true(done.success)
+        assert.is_equal(0.5, store.percent_finished)
+        assert.is_equal("reading", store.summary.status)
+        assert.is_equal(1, #pushed)
+        assert.is_equal(BOOK_ID, pushed[1].id)
+        assert.is_equal("ch:ch-c", pushed[1].location)
+        assert.is_equal(50, pushed[1].percent)
+        assert.is_false(pushed[1].is_read)
+        assert.is_equal("2026-11-12T10:00:00.001Z", pushed[1].updated_at)
+        assert.is_equal("2026-11-12T10:00:00.001Z", store.folio_progress.server)
+        package.loaded["docsettings"] = nil
+
         -- Failures are reported to the user and to the caller
         local shown = {}
         local UIManager = require("ui/uimanager")
@@ -1245,7 +1321,7 @@ describe("Manager with a Chapters book", function()
         assert.is_equal(ChaptersBook.ERR_NO_CHAPTERS, done.err)
         assert.is_truthy(tostring(shown[#shown].text):find("no chapters", 1, true))
         -- The copy on the device is untouched
-        assert.are.same({ "ch-a", "ch-b", "ch-c" }, mgr:get_chapters_layout(target).chapter_ids)
+        assert.are.same({ "ch-a", "ch-b", "ch-c", "ch-d", "ch-e", "ch-f" }, mgr:get_chapters_layout(target).chapter_ids)
     end)
 end)
 

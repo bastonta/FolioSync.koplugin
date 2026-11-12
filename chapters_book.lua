@@ -456,6 +456,76 @@ function M.remap_sync_state(state, moved)
     return changed
 end
 
+--[[--
+Reading percentage (0..100) of a copy after its chapter list changed, for a reader whose
+position stays in the same chapter: it was the `old_index`-th (0-based) of `old_total`
+chapters and is the `new_index`-th of `new_total` now. The place inside that chapter comes
+from the old percentage, so a reader who finished the last of 100 chapters is at 50 % once
+100 more arrive. FolioReader computes the same (`chapters_epub::rescale_percent`).
+]]
+function M.rescale_percent(percent, old_index, old_total, new_index, new_total)
+    percent = tonumber(percent)
+    if not percent or percent ~= percent or old_total <= 0 or new_total <= 0 then
+        return percent
+    end
+    local fraction = math.max(0, math.min(1, percent / 100))
+    local in_chapter = math.max(0, math.min(1, fraction * old_total - old_index))
+    return math.max(0, math.min(100, (new_index + in_chapter) / new_total * 100))
+end
+
+--[[--
+The percentage of a copy follows its chapter list: after an update added, removed or
+reordered chapters, `percent_finished` of a DocSettings object is recomputed for the chapter
+of `last_xpointer` (already remapped to the new spine index), and a finished book with more
+chapters after the reading position than before is marked as being read again.
+
+Returns nil when nothing changed, otherwise { percent = 0..100, unfinished = true|nil }.
+]]
+function M.rescale_docsettings(docsettings, previous_ids, chapter_ids)
+    if not (docsettings and docsettings.readSetting and docsettings.saveSetting) then
+        return nil
+    end
+    if type(previous_ids) ~= "table" or #previous_ids == 0 or type(chapter_ids) ~= "table" then
+        return nil
+    end
+    local new_index = ChaptersEpub.xpointer_spine_index(docsettings:readSetting("last_xpointer"))
+    local chapter_id = new_index and chapter_ids[new_index + 1]
+    if not chapter_id then return nil end
+    local old_index
+    for index, id in ipairs(previous_ids) do
+        if id == chapter_id then
+            old_index = index - 1
+            break
+        end
+    end
+    if not old_index then return nil end
+
+    local old_total, new_total = #previous_ids, #chapter_ids
+    local fraction = tonumber(docsettings:readSetting("percent_finished"))
+    local result = {}
+    if fraction then
+        local percent = M.rescale_percent(fraction * 100, old_index, old_total, new_index, new_total)
+        if math.abs(percent - fraction * 100) >= 0.0001 then
+            docsettings:saveSetting("percent_finished", percent / 100)
+            result.percent = percent
+        end
+    end
+
+    local summary = docsettings:readSetting("summary")
+    if type(summary) == "table" and summary.status == "complete"
+        and new_total - new_index > old_total - old_index then
+        summary.status = "reading"
+        docsettings:saveSetting("summary", summary)
+        result.unfinished = true
+    end
+
+    if result.percent == nil and not result.unfinished then return nil end
+    if result.percent == nil then
+        result.percent = fraction and fraction * 100 or nil
+    end
+    return result
+end
+
 -- ================= DOWNLOAD =================
 
 -- The chapter list of a book (of one volume when `volume` is given), in reading order.
@@ -970,6 +1040,8 @@ function M.build(api, opts)
         -- Old spine index -> new spine index of the chapters that changed their place
         moved = moved,
         has_moved = has_moved,
+        -- Chapter order of the previous build (nil for a new copy)
+        previous_chapter_ids = previous_ids,
         -- true when an existing local copy is being replaced
         updated = updated,
         -- true when the existing copy needs no change (nothing was written)

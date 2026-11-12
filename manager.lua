@@ -2117,6 +2117,45 @@ function Manager:remap_chapter_positions(file_path, moved)
     end
 end
 
+-- The chapter list of a copy changed: its percentage (and read status) is corrected in the
+-- book's settings (ChaptersBook.rescale_docsettings) and queued for the server. When the
+-- server holds this very position (`state.server`), the correction is dated just after
+-- it: a newer position another device sends in the meantime keeps priority. A position
+-- that is waiting to be pushed anyway goes out with the corrected percentage.
+--
+-- Returns the document info to push (see push_progress), or nil when nothing changed.
+function Manager:rescale_chapter_progress(file_path, previous_ids, chapter_ids)
+    local info
+    pcall(function()
+        local DocSettings = require("docsettings")
+        if DocSettings.hasSidecarFile and not DocSettings:hasSidecarFile(file_path) then
+            return
+        end
+        local docsettings = DocSettings:open(file_path)
+        local rescaled = ChaptersBook.rescale_docsettings(docsettings, previous_ids, chapter_ids)
+        if not rescaled then
+            return
+        end
+        local state = self:progress_state(docsettings)
+        local server_epoch = state.server and utils.parse_iso8601(state.server)
+        if server_epoch then
+            state.at = server_epoch - self:clock_offset() + 0.001
+            state.server = nil
+        end
+        self:save_progress_state(docsettings, state)
+        if docsettings.flush then docsettings:flush() end
+        info = {
+            file = file_path,
+            file_path = file_path,
+            location = docsettings:readSetting("last_xpointer"),
+            -- nil (no percentage known) is left out of the request
+            percent = rescaled.percent,
+            docsettings = docsettings,
+        }
+    end)
+    return info
+end
+
 -- Puts a built EPUB in place. When the book is open in the reader, the file is swapped
 -- while the reader is closed and the book is opened again.
 -- Returns ok, error, reopened.
@@ -2136,6 +2175,8 @@ function Manager:install_chapters_build(result)
         if result.has_moved then
             self:remap_chapter_positions(result.target_path, result.moved)
         end
+        result.rescaled = self:rescale_chapter_progress(result.target_path,
+            result.previous_chapter_ids, result.chapter_ids)
         return true
     end
 
@@ -2267,6 +2308,11 @@ function Manager:download_chapters_book(book, target_path, on_done)
             return
         end
         UIManager:broadcastEvent(Event:new("Refresh"))
+        -- The corrected percentage goes to the server right away (a book open in the
+        -- reader is synced when it is opened again)
+        if result.rescaled and not reopened and result.book_id then
+            pcall(function() self:push_progress(result.rescaled, result.book_id, {}) end)
+        end
         if on_done then on_done(true, result, reopened) end
     end
 
