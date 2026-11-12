@@ -163,6 +163,11 @@ describe("FolioSync UpdateChecker", function()
             assert.is_equal(-1, UpdateChecker._compareVersions("1.0.0-alpha", "1.0.0-beta"))
             assert.is_equal(-1, UpdateChecker._compareVersions("1.0.0-beta", "1.0.0-rc"))
             assert.is_equal(1, UpdateChecker._compareVersions("1.0.0-rc", "1.0.0-beta"))
+            -- Numbered pre-releases are ordered by their number, not as text
+            assert.is_equal(1, UpdateChecker._compareVersions("1.0.0-beta.10", "1.0.0-beta.2"))
+            assert.is_equal(-1, UpdateChecker._compareVersions("1.0.0-beta.2", "1.0.0-beta.10"))
+            assert.is_equal(0, UpdateChecker._compareVersions("1.0.0-beta.3", "1.0.0-beta.3"))
+            assert.is_equal(-1, UpdateChecker._compareVersions("1.0.0-beta.10", "1.0.0-rc.1"))
         end)
 
         it("handles dev version comparisons", function()

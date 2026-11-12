@@ -441,6 +441,13 @@ local function compareVersions(v1, v2)
             return order1 < order2 and -1 or 1
         end
 
+        -- `beta.10` is later than `beta.2`: the number is compared as a number
+        local num1 = tonumber(ver1.prerelease:match("(%d+)%D*$")) or 0
+        local num2 = tonumber(ver2.prerelease:match("(%d+)%D*$")) or 0
+        if num1 ~= num2 then
+            return num1 < num2 and -1 or 1
+        end
+
         return ver1.prerelease < ver2.prerelease and -1 or (ver1.prerelease > ver2.prerelease and 1 or 0)
     end
 
