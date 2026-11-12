@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-13
+
 ### Added
 - **Reading books that have no EPUB file yet** (Folio `Chapters` kind): the library browser lists them (`📝`) and downloads them chapter by chapter, assembling a local EPUB with illustrations, cover and a table of contents (`chapters_book.lua`, `chapters_epub.lua`). Downloading a book that is already on the device updates it: only new and changed chapters are fetched, the rest is copied from the previous build. Progress is shown while downloading and the download can be cancelled.
 - **📥 Update Book Chapters from Folio** in the document menu updates the open book and reopens it.
