@@ -24,20 +24,8 @@ function FolioSync:init()
     self.menus = Menus:new(self)
 
     self.manager.ui = self.ui
-
-    -- Ensure the plugin is in the ReaderUI event chain
-    if self.ui then
-        local found = false
-        for _, child in ipairs(self.ui) do
-            if child == self then
-                found = true
-                break
-            end
-        end
-        if not found then
-            table.insert(self.ui, self)
-        end
-    end
+    -- (KOReader adds every plugin to the event chain of the reader itself: adding it
+    -- here as well made each event arrive twice)
 
     -- Load plugin translations dynamically if available for the active locale
     -- NOTE: Must happen BEFORE onDispatcherRegisterActions() so that _() calls
@@ -83,6 +71,30 @@ function FolioSync:init()
     end
 end
 
+--[[--
+Whether sync that nobody asked for may run now. Requests block the reader until they are
+answered, so they are only made when there is a network to answer them: not while Wi-Fi
+is off, and not right after the server failed to respond (the pause grows with every
+failure, see FolioAPI).
+]]
+function FolioSync:background_sync_allowed()
+    if not self.settings.auto_progress_sync then
+        return false
+    end
+    local api = self.api
+    if api and ((api.has_auth and not api:has_auth()) or (api.in_backoff and api:in_backoff())) then
+        return false
+    end
+    local ok, NetworkMgr = pcall(require, "ui/network/manager")
+    if ok and type(NetworkMgr) == "table" and type(NetworkMgr.isConnected) == "function" then
+        local ok_state, connected = pcall(NetworkMgr.isConnected, NetworkMgr)
+        if ok_state and not connected then
+            return false
+        end
+    end
+    return true
+end
+
 function FolioSync:addToMainMenu(menu_items)
     menu_items.folio_sync = self.menus:get_menu_structure()
 end
@@ -114,7 +126,18 @@ function FolioSync:onReaderReady()
     self._session_start_page = init_info and init_info.current_page
     self._session_curr_page = self._session_start_page
 
-    if self.settings.auto_progress_sync then
+    -- Page changes count as reading from the moment the book is up: the ones made while
+    -- it is being opened (and by the reader settling afterwards) are not the user's
+    self._position_page = init_info and init_info.current_page
+    self._track_position = false
+    local UIManager = require("ui/uimanager")
+    if UIManager.nextTick then
+        UIManager:nextTick(function() self._track_position = true end)
+    else
+        self._track_position = true
+    end
+
+    if self:background_sync_allowed() then
         self._is_pulling_on_open = true
         self._last_progress_sync_time = os.time() + 5
         self:pull_and_sync_all()
@@ -123,7 +146,7 @@ end
 
 function FolioSync:pull_and_sync_all(target_ui)
     local ui = target_ui or self:get_ui()
-    if not (self.settings.auto_progress_sync and ui and ui.document) then
+    if not (self:background_sync_allowed() and ui and ui.document) then
         self._is_pulling_on_open = false
         return
     end
@@ -200,6 +223,17 @@ function FolioSync:onPageUpdate(page_number)
     local info = self.manager and self.manager.get_doc_info and self.manager:get_doc_info(ui, ui.document)
     local percent = info and info.percent
     local current_page = page_number or (info and info.current_page)
+
+    -- The reader moved: from now on the position of this device is the newest one
+    -- (unless the move is the plugin opening the position it got from the server)
+    if current_page ~= self._position_page then
+        local known = self._position_page ~= nil
+        self._position_page = current_page
+        if known and self._track_position and self.manager and not self.manager._applying_remote
+            and self.manager.note_position_changed then
+            self.manager:note_position_changed(ui)
+        end
+    end
 
     -- Track active reading session duration
     if self._session_last_active then
@@ -278,7 +312,7 @@ function FolioSync:onPageUpdate(page_number)
 
         if not self._last_progress_sync_time or (now - self._last_progress_sync_time) >= 5 then
             self._last_progress_sync_time = now
-            if self.manager and self.manager.sync_progress then
+            if self.manager and self.manager.sync_progress and self:background_sync_allowed() then
                 self.manager:sync_progress(ui, ui.document, true)
             end
         end
@@ -291,16 +325,23 @@ function FolioSync:_finalize_and_record_session(ui, document)
     if not (target_ui and doc) then return end
 
     local now = os.time()
+    -- The session ends with the last moment that counted as reading
+    local end_time = now
     if self._session_last_active then
         local diff = now - self._session_last_active
         -- If less than 3 minutes (180s) since last interaction, count time on current page
         if diff > 0 and diff < 180 then
             self._session_active_duration = (self._session_active_duration or 0) + diff
+        elseif diff >= 180 then
+            end_time = self._session_last_active
         end
     end
 
     local duration = math.floor(self._session_active_duration or 0)
     local start_time = self._session_start_time
+    if start_time and end_time - start_time < duration then
+        end_time = start_time + duration
+    end
 
     if start_time and duration >= 10 then
         local info = self.manager and self.manager.get_doc_info and self.manager:get_doc_info(target_ui, doc)
@@ -327,7 +368,7 @@ function FolioSync:_finalize_and_record_session(ui, document)
             client_session_id = utils.generate_uuid(),
             device_name = "KOReader",
             start_time = utils.iso8601(start_time),
-            end_time = utils.iso8601(now),
+            end_time = utils.iso8601(end_time),
             duration_seconds = duration,
             start_progress = self._session_start_percent or 0,
             end_progress = end_percent,
@@ -350,37 +391,40 @@ function FolioSync:_finalize_and_record_session(ui, document)
     self._session_curr_page = self._session_start_page
 end
 
-function FolioSync:onCloseDocument()
+-- The book is being closed or the device goes to sleep: what was read is recorded, and
+-- sent when there is a network (KOReader has saved the book's settings by now, so the
+-- plugin writes what it changes in them itself).
+function FolioSync:_sync_on_leave()
     local ui = self:get_ui()
     if ui and ui.document then
         self:_finalize_and_record_session(ui, ui.document)
-        if self.settings.auto_progress_sync and self.manager then
+        if self.manager and self:background_sync_allowed() then
             if not self._jump_pending_since and self.manager.sync_progress then
-                self.manager:sync_progress(ui, ui.document, true)
+                self.manager:sync_progress(ui, ui.document, true, { flush = true })
             end
             if self.manager.sync_reading_sessions then
                 self.manager:sync_reading_sessions(ui, ui.document)
             end
         end
     end
+end
+
+function FolioSync:onCloseDocument()
+    self:_sync_on_leave()
 end
 
 function FolioSync:onSuspend()
-    local ui = self:get_ui()
-    if ui and ui.document then
-        self:_finalize_and_record_session(ui, ui.document)
-        if self.settings.auto_progress_sync and self.manager then
-            if not self._jump_pending_since and self.manager.sync_progress then
-                self.manager:sync_progress(ui, ui.document, true)
-            end
-            if self.manager.sync_reading_sessions then
-                self.manager:sync_reading_sessions(ui, ui.document)
-            end
-        end
-    end
+    self:_sync_on_leave()
 end
 
 function FolioSync:onResume()
+    -- A new reading session starts now, not when the device went to sleep
+    local now = os.time()
+    self._session_start_time = now
+    self._session_last_active = now
+    self._session_active_duration = 0
+    self._session_pages_count = 0
+
     if self.settings.auto_progress_sync then
         local UIManager = require("ui/uimanager")
         if UIManager and UIManager.scheduleIn then
@@ -397,7 +441,7 @@ function FolioSync:onAnnotationsModified(_items)
     if self.manager and self.manager.is_syncing_annotations then
         return
     end
-    if self.settings.auto_progress_sync then
+    if self:background_sync_allowed() then
         local ui = self:get_ui()
         if ui and ui.document then
             local UIManager = require("ui/uimanager")
@@ -409,7 +453,7 @@ function FolioSync:onAnnotationsModified(_items)
             sync_action = function()
                 self._pending_annotation_sync = nil
                 local current_ui = self:get_ui()
-                if self.settings.auto_progress_sync and current_ui and current_ui.document then
+                if self:background_sync_allowed() and current_ui and current_ui.document then
                     self.manager:sync_annotations_and_bookmarks(current_ui, current_ui.document, false)
                 end
             end
@@ -511,6 +555,7 @@ function FolioSync:onFolioSyncToggleRead()
 end
 
 function FolioSync:onFolioSyncCurrentDoc()
+    self.manager:user_requested()
     self.manager:pull_all_data(self:get_ui(), nil, false)
     self.manager:push_all_data(self:get_ui(), nil, true)
     return true

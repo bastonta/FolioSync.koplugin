@@ -789,3 +789,35 @@ msgstr ""
 #: browser.lua
 msgid "Download '%1'"
 msgstr ""
+
+#: manager.lua
+msgid "Illustrations missing on the server: %1."
+msgstr ""
+
+#: manager.lua
+msgid ""
+"The connection to Folio was lost while downloading '%1'.\n"
+"%2\n"
+"\n"
+"Try again?"
+msgstr ""
+
+#: manager.lua
+msgid "Try again"
+msgstr ""
+
+#: manager.lua
+msgid "Fetching reading progress from Folio..."
+msgstr ""
+
+#: manager.lua
+msgid "Fetched progress: %1"
+msgstr ""
+
+#: manager.lua
+msgid "All document data fetched from Folio!"
+msgstr ""
+
+#: manager.lua
+msgid "Failed to fetch document data from Folio."
+msgstr ""

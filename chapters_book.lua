@@ -30,8 +30,14 @@ M.ERR_NAME_TAKEN = "FILE_NAME_TAKEN"
 
 -- Page size of the chapter list (the server clamps it to 500).
 local CHAPTERS_PAGE_SIZE = 500
--- Attempts per request (network errors, 5xx and 429 are retried).
-local MAX_ATTEMPTS = 3
+-- Illustrations missing from a copy that are asked for one by one before an update is
+-- declared unnecessary; with more than that the copy is rebuilt.
+local MAX_ABSENT_PROBES = 50
+-- Pauses between attempts of one request, in seconds (network errors, 5xx and 429 are
+-- retried). The patient schedule is for the chapters and illustrations of a download that
+-- is already under way: a long book must survive a Wi-Fi hiccup.
+local QUICK_DELAYS = { 0.3, 0.6 }
+local PATIENT_DELAYS = { 1, 2, 4, 8 }
 
 local function as_string(v)
     return type(v) == "string" and v or nil
@@ -54,23 +60,40 @@ local function file_size(path)
     return size
 end
 
--- Runs `request` (returning ok, result, http_code) until it succeeds or fails for good.
-local function with_retry(request)
-    local ok, res, code
-    for attempt = 1, MAX_ATTEMPTS do
-        ok, res, code = request()
-        if ok then
-            return true, res
+local function sleep(seconds)
+    pcall(function()
+        require("ffi/util").usleep(math.floor(seconds * 1000000))
+    end)
+end
+
+--[[--
+Runs `request` (returning ok, result, http_code) until it succeeds or fails for good.
+
+`on_stalled(message)` (optional) is asked once the attempts are used up while the server
+still cannot be reached; returning true starts another round. A long download then waits
+for the user (the network went away, the device slept) instead of being thrown away.
+]]
+local function with_retry(request, on_stalled)
+    local delays = on_stalled and PATIENT_DELAYS or QUICK_DELAYS
+    while true do
+        local ok, res, code
+        for attempt = 1, #delays + 1 do
+            ok, res, code = request()
+            if ok then
+                return true, res
+            end
+            local retryable = code == nil or code >= 500 or code == 429
+            if not retryable then
+                return false, res, code
+            end
+            if attempt <= #delays then
+                sleep(delays[attempt])
+            end
         end
-        local retryable = code == nil or code >= 500 or code == 429
-        if not retryable or attempt == MAX_ATTEMPTS then
-            break
+        if not (on_stalled and on_stalled(res)) then
+            return false, res, code
         end
-        pcall(function()
-            require("ffi/util").usleep(300000 * attempt)
-        end)
     end
-    return false, res, code
 end
 
 -- ================= CHAPTER LAYOUT =================
@@ -343,31 +366,6 @@ function M.incoming_location(layout, remote, local_xpointer)
     return "at", ChaptersEpub.chapter_start_xpointer(position)
 end
 
---[[--
-Whether the server position is further in the book than the local one. Percentages cannot
-tell: every client counts them its own way (the web reader by chapters, KOReader by pages).
-
-Returns nil when the positions cannot be compared by chapter (the caller then falls back
-to percentages): the server position is not a chapter reference, the local position is
-unknown, or the chapter is not in this copy — it may be a newer one, or one that was
-deleted on the server, and the latter must not block pushes for good.
-]]
-function M.remote_is_ahead(layout, remote, local_xpointer)
-    local chapter_id = type(remote) == "string" and remote:match("^ch:(.+)$")
-    if not chapter_id then
-        return nil
-    end
-    local local_position = ChaptersEpub.xpointer_spine_index(local_xpointer)
-    if not local_position then
-        return nil
-    end
-    local remote_position = layout.positions[chapter_id]
-    if not remote_position then
-        return nil
-    end
-    return remote_position > local_position
-end
-
 -- Old spine index -> new spine index for chapters that changed their place.
 local function moved_chapters(previous_ids, chapter_ids)
     local moved, has_moved = {}, false
@@ -508,13 +506,19 @@ Returns { items = { { volume = n, chapters = n }, ... }, total = n } — or nil,
 http_code. A server older than the volumes feature answers 403 or 404: callers then offer
 the whole book only.
 ]]
-function M.fetch_volumes(api, book_id)
+function M.fetch_volumes(api, book_id, background)
     if type(api.list_volumes) ~= "function" then
         return nil, "Volumes are not supported"
     end
-    local ok, data, code = with_retry(function()
-        return api:list_volumes(book_id)
-    end)
+    local ok, data, code
+    if background then
+        -- Background sync runs on the UI thread: one short attempt
+        ok, data, code = api:list_volumes(book_id, true)
+    else
+        ok, data, code = with_retry(function()
+            return api:list_volumes(book_id)
+        end)
+    end
     if not ok then
         return nil, data, code
     end
@@ -541,6 +545,31 @@ local function chapters_before(volumes, volume)
         end
     end
     return before
+end
+
+--[[--
+Where the copy of `layout` sits in the book as the server has it now. Volumes are added
+and chapters move between them after a copy was downloaded; a copy that goes by what it
+knew then would call a book finished that has gone on, and shift its bookmarks and
+annotations by the wrong number of chapters.
+
+Returns a scope ({ volume, chapters_before, book_chapters }) and whether it differs from
+what the layout holds — or nil, message, http_code. A whole-book copy has no scope: nil.
+]]
+function M.current_scope(api, layout)
+    if not M.is_volume_copy(layout) then return nil end
+    local volumes, err, code = M.fetch_volumes(api, layout.book_id, true)
+    if not volumes then
+        return nil, err, code
+    end
+    local scope = volume_scope({
+        volume = layout.volume,
+        chapters_before = chapters_before(volumes, layout.volume),
+        book_chapters = volumes.total,
+    }, #layout.chapter_ids)
+    local changed = scope.chapters_before ~= layout.chapters_before
+        or scope.book_chapters ~= layout.book_chapters
+    return scope, changed
 end
 
 --[[--
@@ -590,6 +619,8 @@ opts:
 - previous_chapter_ids: chapter order of the copy being replaced, when known
 - on_progress(phase, done, total): phase is "chapters", "images" or "building";
   returning false cancels the download
+- on_stalled(message): the server cannot be reached in the middle of the download;
+  returning true tries again (see with_retry)
 - open_sink, read_existing: injectable for tests
 
 Returns a result table, or nil and an error (one of the ERR_* constants or a message).
@@ -598,6 +629,7 @@ function M.build(api, opts)
     local book_id = opts.book_id
     local target_path = opts.target_path
     local progress = opts.on_progress or function() return true end
+    local on_stalled = opts.on_stalled
     local open_sink = opts.open_sink or ChaptersEpub.open_sink
     local read_existing = opts.read_existing or ChaptersEpub.read_existing
 
@@ -689,9 +721,13 @@ function M.build(api, opts)
 
     -- Nothing changed on the server since the previous build: the file stays as it is
     -- (a rewritten file would be rendered from scratch by the reader).
+    -- Illustrations fetched while checking for changes: name -> bytes
+    local fetched_images = {}
     if existing then
         local stored_chapters = existing.manifest.chapters
         local unchanged = #stored_chapters == #list
+        -- Illustrations the previous build could not get from the server
+        local absent, absent_set = {}, {}
         for index, summary in ipairs(list) do
             if not unchanged then break end
             local stored = stored_chapters[index].id == summary.id
@@ -700,9 +736,30 @@ function M.build(api, opts)
                 unchanged = false
             else
                 for _, name in ipairs(stored.images) do
-                    if not existing:has_image(name) then
-                        unchanged = false
+                    if not existing:has_image(name) and not absent_set[name] then
+                        absent_set[name] = true
+                        absent[#absent + 1] = name
                     end
+                end
+            end
+        end
+        -- An illustration the server does not have must not turn every update into a
+        -- rebuild of the whole file: ask for the absent ones first, and rebuild only when
+        -- one of them has turned up (or cannot be asked about)
+        if unchanged and #absent > MAX_ABSENT_PROBES then
+            unchanged = false
+        end
+        if unchanged then
+            for _, name in ipairs(absent) do
+                local ok, bytes, code = with_retry(function()
+                    return api:get_book_image(book_id, name)
+                end)
+                if ok and bytes ~= "" then
+                    fetched_images[name] = bytes
+                    unchanged = false
+                elseif not ok and (code == nil or code >= 500 or code == 429) then
+                    existing:close()
+                    return nil, "Failed to download illustration " .. name .. ": " .. tostring(bytes)
                 end
             end
         end
@@ -721,7 +778,7 @@ function M.build(api, opts)
                 chapters_total = #list,
                 chapters_fetched = 0,
                 images_fetched = 0,
-                images_missing = 0,
+                images_missing = #absent,
             }
         end
     end
@@ -776,7 +833,7 @@ function M.build(api, opts)
         else
             local ok, chapter, code = with_retry(function()
                 return api:get_chapter(book_id, summary.id)
-            end)
+            end, on_stalled)
             if not ok then
                 if code == 403 then
                     return fail(M.ERR_FORBIDDEN)
@@ -831,9 +888,12 @@ function M.build(api, opts)
         return fail(M.ERR_CANCELLED)
     end
     for index, name in ipairs(to_fetch) do
-        local ok, bytes, code = with_retry(function()
-            return api:get_book_image(book_id, name)
-        end)
+        local ok, bytes, code = true, fetched_images[name], nil
+        if not bytes then
+            ok, bytes, code = with_retry(function()
+                return api:get_book_image(book_id, name)
+            end, on_stalled)
+        end
         if ok and bytes ~= "" then
             local ok_add, add_err = writer:add_image(name, bytes)
             if not ok_add then
@@ -872,6 +932,22 @@ function M.build(api, opts)
     if not manifest then
         os.remove(tmp_path)
         return nil, finish_err
+    end
+    -- A file that was cut short (full disk) must not replace the copy that is there.
+    -- Reading it back is only possible where archives can be read at all.
+    local written = opts.open_sink == nil and file_size(tmp_path) or nil
+    if opts.open_sink == nil and (not written or written == 0) then
+        os.remove(tmp_path)
+        return nil, "Failed to write the book file"
+    end
+    if opts.open_sink == nil and opts.read_existing == nil and ChaptersEpub.can_read_archives() then
+        local check = read_existing(tmp_path)
+        local complete = check ~= nil and #check.manifest.chapters == #chapters
+        if check then check:close() end
+        if not complete then
+            os.remove(tmp_path)
+            return nil, "Failed to write the book file"
+        end
     end
 
     local chapter_ids = {}

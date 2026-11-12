@@ -1054,22 +1054,19 @@ describe("FolioSync Footnote, Bookmark and Link Navigation Guards (Option 4)", f
         assert.is_equal(2, sync_count)
     end)
 
-    it("allows rollback in Manager:sync_progress if remote ahead progress was pushed by this session", function()
+    it("lets the reader go back in the book: the position that was changed last is the one that counts", function()
         local Manager = require("manager")
-        local pushed_percent = nil
+        local pushed = {}
 
         local fake_api = {
             has_auth = function(self) return true end,
-            get_progress = function(self, book_id, callback)
-                -- Remote server has 95%
-                callback(true, { progressPercent = 95, isRead = false })
-            end,
-            update_progress = function(self, book_id, location, percent, is_read, callback)
-                pushed_percent = percent
-                callback(true)
+            update_progress = function(self, book_id, location, percent, is_read, callback, opts)
+                pushed[#pushed + 1] = { percent = percent, updated_at = opts and opts.updated_at }
+                callback(true, { applied = true, updatedAt = opts.updated_at, isRead = false })
             end,
         }
 
+        local store = { folio_progress = { at = os.time() - 86400, server = "2026-11-11T10:00:00.000Z" } }
         local mgr = Manager:new({ api = fake_api })
         mgr.resolve_book_id = function(self, ui, doc, cb) cb("book_uuid_1") end
         mgr.get_doc_read_status = function(self, info) return false end
@@ -1080,57 +1077,24 @@ describe("FolioSync Footnote, Bookmark and Link Navigation Guards (Option 4)", f
                 location = "page_50",
                 total_pages = 250,
                 current_page = 50,
+                docsettings = {
+                    readSetting = function(_, key) return store[key] end,
+                    saveSetting = function(_, key, value) store[key] = value end,
+                },
             }
         end
 
-        -- Record that this session previously pushed 95%
-        mgr._last_pushed_percent["book_uuid_1"] = 95
-
-        -- Now sync progress at 20%
+        -- The server has this position (95% yesterday): nothing to send
         mgr:sync_progress({}, {}, true)
+        assert.is_equal(0, #pushed)
 
-        -- Since 95% was our own push, rollback to 20% should be ALLOWED
-        assert.is_equal(20, pushed_percent)
-        assert.is_equal(20, mgr._last_pushed_percent["book_uuid_1"])
-    end)
-
-    it("blocks rollback in Manager:sync_progress if remote ahead progress was pushed by another device", function()
-        local Manager = require("manager")
-        local pushed_percent = nil
-
-        local fake_api = {
-            has_auth = function(self) return true end,
-            get_progress = function(self, book_id, callback)
-                -- Remote server has 95% from another device
-                callback(true, { progressPercent = 95, isRead = false })
-            end,
-            update_progress = function(self, book_id, location, percent, is_read, callback)
-                pushed_percent = percent
-                callback(true)
-            end,
-        }
-
-        local mgr = Manager:new({ api = fake_api })
-        mgr.resolve_book_id = function(self, ui, doc, cb) cb("book_uuid_1") end
-        mgr.get_doc_read_status = function(self, info) return false end
-        mgr.get_doc_info = function(self, ui, doc)
-            return {
-                file = "/books/test.epub",
-                percent = 20,
-                location = "page_50",
-                total_pages = 250,
-                current_page = 50,
-            }
-        end
-
-        -- This session only pushed 15% previously (95% came from another device)
-        mgr._last_pushed_percent["book_uuid_1"] = 15
-
-        -- Now sync progress at 20%
+        -- The reader went back to 20% to read again
+        mgr:note_position_changed({ doc_settings = { readSetting = function(_, key) return store[key] end,
+            saveSetting = function(_, key, value) store[key] = value end } })
         mgr:sync_progress({}, {}, true)
-
-        -- Remote 95% from another device is protected -> push blocked
-        assert.is_nil(pushed_percent)
+        assert.is_equal(1, #pushed)
+        assert.is_equal(20, pushed[1].percent)
+        assert.is_equal(require("utils").iso8601_ms(store.folio_progress.at), pushed[1].updated_at)
     end)
 end)
 

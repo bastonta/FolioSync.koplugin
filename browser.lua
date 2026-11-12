@@ -579,18 +579,25 @@ function FolioBrowser:toggle_book_read_status(book, is_read, parent_menu)
                 or T(_("Marked '%1' as unread on Folio."), book_title)
             utils.show_msg(msg)
 
-            -- Also try to update local document if it's already downloaded on device
+            -- Also update the copy on this device, when the book was downloaded
+            -- (a status written for a file that is not there would leave an empty
+            -- settings folder behind)
             local default_dir = self.plugin.settings.download_dir
             local clean_title = utils.sanitize_filename(book_title)
             local clean_author = utils.sanitize_filename(book.author or "")
-            local filename = clean_author ~= "" and (clean_title .. " - " .. clean_author .. ".epub") or (clean_title .. ".epub")
+            local stem = clean_author ~= "" and (clean_title .. " - " .. clean_author) or clean_title
             local series_path = self:resolve_series_path(book)
             local target_dir = utils.build_book_target_dir(default_dir, series_path)
-            local local_path = target_dir .. "/" .. filename
-            if self.plugin.manager and self.plugin.manager.set_local_read_status then
-                self.plugin.manager:set_local_read_status(local_path, is_read)
-                if target_dir ~= default_dir then
-                    self.plugin.manager:set_local_read_status(default_dir .. "/" .. filename, is_read)
+            local manager = self.plugin.manager
+            if manager and manager.set_local_read_status and manager.resolve_download_target then
+                local seen = {}
+                for _, dir in ipairs({ target_dir, default_dir }) do
+                    local ok, local_path, on_device = pcall(manager.resolve_download_target, manager, dir, stem, book.id)
+                    if ok and local_path and on_device and not seen[local_path]
+                        and manager:local_file_book_id(local_path) == book.id then
+                        seen[local_path] = true
+                        manager:set_local_read_status(local_path, is_read)
+                    end
                 end
             end
 
@@ -641,19 +648,21 @@ function FolioBrowser:start_download(book, download_dir)
     local book_title = book.name or book.title or "book"
     local clean_title = utils.sanitize_filename(book_title)
     local clean_author = utils.sanitize_filename(book.author or "")
-    local filename = clean_author ~= "" and (clean_title .. " - " .. clean_author .. ".epub") or (clean_title .. ".epub")
+    local stem = clean_author ~= "" and (clean_title .. " - " .. clean_author) or clean_title
 
     local series_path = self:resolve_series_path(book)
     local target_dir = utils.build_book_target_dir(download_dir, series_path)
-    local target_path = target_dir .. "/" .. filename
-
-    -- Check if file already exists
-    local file_exists = false
-    local f = io.open(target_path, "r")
-    if f then
-        f:close()
-        file_exists = true
+    -- A file of that name may be another book with the same title and author: it is
+    -- left alone, and this one gets its id into the name
+    local target_path, file_exists = target_dir .. "/" .. stem .. ".epub", false
+    local manager = self.plugin.manager
+    if manager and manager.resolve_download_target then
+        local ok, path, on_device = pcall(manager.resolve_download_target, manager, target_dir, stem, book.id, true)
+        if ok and path then
+            target_path, file_exists = path, on_device
+        end
     end
+    local filename = utils.get_file_basename(target_path)
 
     local confirm_text
     if file_exists then

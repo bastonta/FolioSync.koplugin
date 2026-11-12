@@ -280,6 +280,7 @@ function Menus:toggle_active_doc_read_status()
 
     local current_read = self.plugin.manager:get_doc_read_status(info)
     local target_read = not current_read
+    self.plugin.manager:user_requested()
 
     self.plugin.manager:resolve_book_id(ui, doc, function(book_id)
         if not book_id then
@@ -297,9 +298,7 @@ function Menus:toggle_active_doc_read_status()
             return
         end
 
-        local location = self.plugin.manager:outgoing_location(info)
-        local percent = self.plugin.manager:outgoing_percent(info)
-        self.api:update_progress(book_id, location, percent, target_read, function(success)
+        self.plugin.manager:push_read_status(info, book_id, target_read, function(success)
             self.plugin.manager:set_local_read_status(info, target_read, info.docsettings)
             if success then
                 local msg = target_read and _("Marked as read on Folio and device.")

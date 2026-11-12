@@ -25,6 +25,78 @@ local function urlencode(str)
     return str
 end
 
+-- ================= NETWORK STATE =================
+-- Requests are synchronous and run on the UI thread, so a server that does not answer
+-- must cost as little as possible: short timeouts, no second request right after one
+-- that failed, and a growing pause before background sync tries again.
+
+-- Seconds to wait for a connection / between two chunks, and for a whole response
+local API_BLOCK_TIMEOUT, API_TOTAL_TIMEOUT = 5, 15
+-- Chapters, illustrations and book files: long-running downloads the user asked for
+local BULK_BLOCK_TIMEOUT, BULK_TOTAL_TIMEOUT = 15, 120
+-- After a network error every further request fails at once for this long: it covers
+-- the rest of the sync that was running (each step would wait for its own timeout)
+local FAIL_FAST_SECONDS = 3
+-- Pause before background sync is tried again: doubles with every failure in a row
+local BACKOFF_FIRST, BACKOFF_MAX = 30, 600
+
+local net_state = {
+    failures = 0,
+    fail_fast_until = 0,
+    retry_at = 0,
+    -- Server clock minus device clock, in seconds; nil until a response told us
+    clock_offset = nil,
+}
+
+local function note_network_failure()
+    local now = os.time()
+    net_state.failures = net_state.failures + 1
+    local pause = BACKOFF_FIRST * 2 ^ math.min(net_state.failures - 1, 10)
+    net_state.fail_fast_until = now + FAIL_FAST_SECONDS
+    net_state.retry_at = now + math.min(pause, BACKOFF_MAX)
+end
+
+local function note_response(resp_headers)
+    net_state.failures = 0
+    net_state.fail_fast_until = 0
+    net_state.retry_at = 0
+    local date = type(resp_headers) == "table" and (resp_headers.date or resp_headers.Date) or nil
+    local server_now = utils.parse_http_date(date)
+    if server_now then
+        net_state.clock_offset = server_now - os.time()
+    elseif net_state.clock_offset == nil then
+        -- No Date header to learn from: trust the device clock
+        net_state.clock_offset = 0
+    end
+end
+
+-- Decodes a JSON document. JSON `null` comes out of KOReader's decoder as a placeholder
+-- value (not nil); it is dropped here so that it can never reach a book's settings file.
+local function scrub_nulls(value)
+    for key, item in pairs(value) do
+        local kind = type(item)
+        if kind == "table" then
+            scrub_nulls(item)
+        elseif kind ~= "string" and kind ~= "number" and kind ~= "boolean" then
+            value[key] = nil
+        end
+    end
+    return value
+end
+
+local function decode_json(body)
+    local ok, data = pcall(json.decode, body)
+    if not ok then
+        return false, data
+    end
+    if type(data) == "table" then
+        scrub_nulls(data)
+    elseif type(data) ~= "string" and type(data) ~= "number" and type(data) ~= "boolean" then
+        data = nil
+    end
+    return true, data
+end
+
 local function get_http_client()
     local ok_http, sockethttp = pcall(require, "socket.http")
     local ok_https, sslhttps = pcall(require, "ssl.https")
@@ -42,13 +114,20 @@ local function get_http_client()
     local client = {}
 
     -- opts.quiet: bulk / binary request, keep it out of the info log
+    -- opts.bulk: part of a long download (own retries, long timeouts, never fails fast)
+    -- opts.sink: ltn12 sink that receives the response body instead of a string
     local function do_request(url, method, body, headers, opts)
         local quiet = opts and opts.quiet
+        local bulk = opts and opts.bulk
+        if not bulk and os.time() < net_state.fail_fast_until then
+            return nil, "network unavailable"
+        end
+
         local response_body = {}
+        local sink = opts and opts.sink
         local request_params = {
             url    = url,
             method = method,
-            sink   = ltn12.sink.table(response_body),
         }
 
         if headers then
@@ -67,9 +146,22 @@ local function get_http_client()
 
         if ok_su and socketutil then
             if socketutil.set_timeout then
-                socketutil:set_timeout(10, 30)
+                if bulk then
+                    socketutil:set_timeout(BULK_BLOCK_TIMEOUT, BULK_TOTAL_TIMEOUT)
+                else
+                    socketutil:set_timeout(API_BLOCK_TIMEOUT, API_TOTAL_TIMEOUT)
+                end
             end
         end
+        if not sink then
+            -- socketutil's sink also enforces the total timeout
+            if ok_su and socketutil and socketutil.table_sink then
+                sink = socketutil.table_sink(response_body)
+            else
+                sink = ltn12.sink.table(response_body)
+            end
+        end
+        request_params.sink = sink
 
         local http_driver = sockethttp
         if url and url:sub(1, 6):lower() == "https:" and ok_https and sslhttps then
@@ -85,7 +177,11 @@ local function get_http_client()
 
         local res, code, resp_headers
         if http_driver then
-            res, code, resp_headers = http_driver.request(request_params)
+            local ok_call
+            ok_call, res, code, resp_headers = pcall(http_driver.request, request_params)
+            if not ok_call then
+                res, code, resp_headers = nil, res, nil
+            end
         end
 
         if ok_su and socketutil then
@@ -95,10 +191,14 @@ local function get_http_client()
         end
 
         if res == nil then
+            if not bulk then
+                note_network_failure()
+            end
             logger.warn(string.format("FolioSync API: [HTTP %s] %s -> NETWORK ERROR: %s",
                 method or "GET", url or "nil", tostring(code)))
             return nil, tostring(code) -- code contains the error message on failure
         end
+        note_response(resp_headers)
 
         local resp_str = table.concat(response_body)
         local status_num = tonumber(code) or 0
@@ -117,8 +217,8 @@ local function get_http_client()
         end
 
         return {
-            code = code,
-            status = code,
+            code = status_num,
+            status = status_num,
             body = resp_str,
             content = resp_str,
             headers = resp_headers,
@@ -181,6 +281,32 @@ function FolioAPI:get_headers()
     return make_headers(self:get_api_key())
 end
 
+-- Whether background sync should stay quiet for now: the last requests did not reach the
+-- server, and the pause before the next attempt is not over.
+function FolioAPI:in_backoff()
+    return os.time() < net_state.retry_at
+end
+
+-- Forgets earlier network failures: the user asked for something, try right away.
+function FolioAPI:reset_backoff()
+    net_state.failures = 0
+    net_state.fail_fast_until = 0
+    net_state.retry_at = 0
+end
+
+-- Server clock minus device clock in seconds, learned from the `Date` header of the last
+-- response; nil before the first response. Reading positions are compared by time, and
+-- the clock of an e-reader is often wrong.
+function FolioAPI:clock_offset()
+    return net_state.clock_offset
+end
+
+-- Whether the server compares `updatedAt` of a pushed reading position with what it has
+-- (it then answers with `applied`). nil until a position has been pushed.
+function FolioAPI:conditional_progress()
+    return net_state.conditional_progress
+end
+
 function FolioAPI:find_book_by_hash(file_hash, callback)
     local base_url = self:get_server_url()
     local url = base_url .. "/books/by-hash/" .. tostring(file_hash)
@@ -201,7 +327,7 @@ function FolioAPI:find_book_by_hash(file_hash, callback)
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and data then
             if callback then callback(true, data) end
             return true, data
@@ -209,13 +335,13 @@ function FolioAPI:find_book_by_hash(file_hash, callback)
     end
 
     if code == 404 then
-        if callback then callback(false, "not_found") end
-        return false, "not_found"
+        if callback then callback(false, "not_found", code) end
+        return false, "not_found", code
     end
 
     local msg = "Failed to find book by hash (HTTP " .. tostring(code) .. ")"
-    if callback then callback(false, msg) end
-    return false, msg
+    if callback then callback(false, msg, code) end
+    return false, msg, code
 end
 
 function FolioAPI:browse(series_id, sort_by, offset, limit, search, search_by, callback)
@@ -254,7 +380,7 @@ function FolioAPI:browse(series_id, sort_by, offset, limit, search, search_by, c
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and data then
             if callback then callback(true, data) end
             return true, data
@@ -296,7 +422,7 @@ function FolioAPI:list_books(page, limit, search, callback)
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and data then
             if callback then callback(true, data) end
             return true, data
@@ -328,7 +454,7 @@ function FolioAPI:get_book(book_id, callback)
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and data then
             if callback then callback(true, data) end
             return true, data
@@ -364,7 +490,7 @@ function FolioAPI:get_series(search, callback)
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and type(data) == "table" then
             if callback then callback(true, data) end
             return true, data
@@ -376,52 +502,113 @@ function FolioAPI:get_series(search, callback)
     return false, msg
 end
 
+-- Puts `tmp_path` in place of `target_path`. Some filesystems refuse to rename over an
+-- existing file: the old copy is then moved aside and put back if the new one still
+-- cannot take its place.
+local function replace_file(tmp_path, target_path)
+    local ok, err = os.rename(tmp_path, target_path)
+    if not ok and utils.file_exists(target_path) then
+        local backup = target_path .. ".old"
+        os.remove(backup)
+        if os.rename(target_path, backup) then
+            ok, err = os.rename(tmp_path, target_path)
+            if ok then
+                os.remove(backup)
+            else
+                os.rename(backup, target_path)
+            end
+        end
+    end
+    return ok and true or false, err
+end
+
+-- Downloads the file of a book to `save_path`. The body is streamed to a temporary file
+-- next to the target, which takes the target's place only once it is complete: a failed
+-- download (network, full disk) leaves the copy that was there untouched.
 function FolioAPI:download_book(book_id, save_path, callback)
+    local function done(ok, res)
+        if callback then callback(ok, res) end
+        return ok, res
+    end
+
     local base_url = self:get_server_url()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/download"
 
     local http = get_http_client()
     if not http then
-        if callback then callback(false, "HTTP client unavailable") end
-        return false, "HTTP client unavailable"
+        return done(false, "HTTP client unavailable")
     end
 
-    local response, err = http.get(url, self:get_headers())
+    local tmp_path = tostring(save_path) .. ".part"
+    local handle = io.open(tmp_path, "wb")
+    if not handle then
+        return done(false, "Cannot write file to " .. tostring(save_path))
+    end
+
+    local written, write_err = 0, nil
+    local function sink(chunk)
+        if chunk and chunk ~= "" then
+            local ok_write, err = handle:write(chunk)
+            if not ok_write then
+                write_err = tostring(err or "write failed")
+                return nil, write_err
+            end
+            written = written + #chunk
+        end
+        return 1
+    end
+
+    local headers = self:get_headers()
+    headers["Content-Type"] = nil
+    headers["Accept"] = "*/*"
+    local response, err = http.get(url, headers, { quiet = true, bulk = true, sink = sink })
+    local closed, close_err = handle:close()
+    if not closed and not write_err then
+        -- Buffered data that did not fit on the disk is reported here
+        write_err = tostring(close_err or "write failed")
+    end
+
     if not response then
-        local msg = "Download failed: " .. tostring(err)
-        if callback then callback(false, msg) end
-        return false, msg
+        os.remove(tmp_path)
+        if write_err then
+            return done(false, "Cannot write file to " .. tostring(save_path) .. ": " .. write_err)
+        end
+        return done(false, "Download failed: " .. tostring(err))
     end
 
     local code = response.code or response.status or 0
-    local body = response.body or response.content or ""
-
-    if code >= 200 and code < 300 and #body > 0 then
-        local f = io.open(save_path, "wb")
-        if not f then
-            local msg = "Cannot write file to " .. tostring(save_path)
-            if callback then callback(false, msg) end
-            return false, msg
-        end
-        f:write(body)
-        f:close()
-        if callback then callback(true, save_path) end
-        return true, save_path
-    elseif code == 409 then
+    if code == 409 then
+        os.remove(tmp_path)
         -- Book assembled from chapters: the server has no file for it
-        local msg = "This book is assembled from chapters on the server and has no EPUB file"
-        if callback then callback(false, msg) end
-        return false, msg
-    else
-        local msg = "Download failed (HTTP " .. tostring(code) .. ")"
-        if callback then callback(false, msg) end
-        return false, msg
+        return done(false, "This book is assembled from chapters on the server and has no EPUB file")
+    elseif code < 200 or code >= 300 then
+        os.remove(tmp_path)
+        return done(false, "Download failed (HTTP " .. tostring(code) .. ")")
     end
+
+    local expected = type(response.headers) == "table"
+        and tonumber(response.headers["content-length"] or response.headers["Content-Length"]) or nil
+    if write_err then
+        os.remove(tmp_path)
+        return done(false, "Cannot write file to " .. tostring(save_path) .. ": " .. write_err)
+    elseif written == 0 or (expected and expected ~= written) or utils.file_stat(tmp_path) ~= written then
+        os.remove(tmp_path)
+        return done(false, "Download failed: the file is incomplete")
+    end
+
+    local renamed, rename_err = replace_file(tmp_path, save_path)
+    if not renamed then
+        os.remove(tmp_path)
+        return done(false, "Cannot write file to " .. tostring(save_path) .. ": " .. tostring(rename_err))
+    end
+    return done(true, save_path)
 end
 
 -- GET `path` (relative to the server URL) without touching the info log.
 -- Returns true, body | false, message, http_code (code is nil on a network error).
-function FolioAPI:get_raw(path, accept)
+-- `background`: asked by background sync, not by a download the user is waiting for —
+-- short timeouts, and no attempt at all right after the network failed.
+function FolioAPI:get_raw(path, accept, background)
     local http = get_http_client()
     if not http then
         return false, "HTTP client unavailable"
@@ -431,7 +618,7 @@ function FolioAPI:get_raw(path, accept)
     headers["Content-Type"] = nil
     headers["Accept"] = accept or "*/*"
 
-    local response, err = http.get(self:get_server_url() .. path, headers, { quiet = true })
+    local response, err = http.get(self:get_server_url() .. path, headers, { quiet = true, bulk = not background })
     if not response then
         return false, tostring(err)
     end
@@ -444,12 +631,12 @@ function FolioAPI:get_raw(path, accept)
 end
 
 -- Like get_raw, but decodes a JSON object / array response.
-function FolioAPI:get_json(path)
-    local ok, body, code = self:get_raw(path, "application/json")
+function FolioAPI:get_json(path, background)
+    local ok, body, code = self:get_raw(path, "application/json", background)
     if not ok then
         return false, body, code
     end
-    local ok_json, data = pcall(json.decode, body)
+    local ok_json, data = decode_json(body)
     if ok_json and type(data) == "table" then
         return true, data
     end
@@ -472,8 +659,8 @@ end
 -- Volumes of a Chapters book, in reading order:
 -- { items = { { volume = n, chaptersCount = n, ... } }, chaptersTotal = n }.
 -- Servers older than the volumes feature answer 403 (API key allow-list) or 404.
-function FolioAPI:list_volumes(book_id)
-    return self:get_json(string.format("/books/%s/volumes", tostring(book_id)))
+function FolioAPI:list_volumes(book_id, background)
+    return self:get_json(string.format("/books/%s/volumes", tostring(book_id)), background)
 end
 
 -- A chapter with its content paragraphs.
@@ -491,6 +678,8 @@ function FolioAPI:get_book_cover(book_id)
     return self:get_raw(string.format("/books/%s/cover", tostring(book_id)))
 end
 
+-- callback(true, data) | callback(false, message, http_code); the code is nil on a
+-- network error and 404 when the server has no progress for the book.
 function FolioAPI:get_progress(book_id, callback)
     local base_url = self:get_server_url()
     local url = base_url .. "/books/" .. tostring(book_id) .. "/progress?format=xpointer"
@@ -511,19 +700,25 @@ function FolioAPI:get_progress(book_id, callback)
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and data then
             if callback then callback(true, data) end
             return true, data
         end
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
-function FolioAPI:update_progress(book_id, location, progress_percent, is_read, callback)
-    if type(is_read) == "function" and callback == nil then
+-- `opts.updated_at` (RFC 3339): when the position actually changed. A server that knows
+-- the field keeps a newer position of its own and says so with `applied = false`; an
+-- older server ignores the field and always writes.
+-- callback(true, data) — data is the progress row as it is on the server now (nil when
+-- the response carried none) — or callback(false, message, http_code).
+function FolioAPI:update_progress(book_id, location, progress_percent, is_read, callback, opts)
+    if type(is_read) == "function" and (callback == nil or type(callback) == "table") then
+        opts = callback
         callback = is_read
         is_read = nil
     end
@@ -532,7 +727,8 @@ function FolioAPI:update_progress(book_id, location, progress_percent, is_read, 
     local url = base_url .. "/books/" .. tostring(book_id) .. "/progress?format=xpointer"
 
     local body_tab = {}
-    if location ~= nil then
+    -- An empty location means "no position": it is never sent
+    if type(location) == "string" and location ~= "" then
         body_tab.location = location
     end
     if progress_percent ~= nil then
@@ -540,6 +736,9 @@ function FolioAPI:update_progress(book_id, location, progress_percent, is_read, 
     end
     if is_read ~= nil then
         body_tab.isRead = is_read
+    end
+    if type(opts) == "table" and type(opts.updated_at) == "string" and opts.updated_at ~= "" then
+        body_tab.updatedAt = opts.updated_at
     end
 
     local payload = json.encode(body_tab)
@@ -558,12 +757,17 @@ function FolioAPI:update_progress(book_id, location, progress_percent, is_read, 
 
     local code = response.code or response.status or 0
     if code >= 200 and code < 300 then
-        if callback then callback(true) end
-        return true
+        local ok, data = decode_json(response.body or response.content or "")
+        if not ok or type(data) ~= "table" then data = nil end
+        if data and body_tab.updatedAt then
+            net_state.conditional_progress = data.applied ~= nil
+        end
+        if callback then callback(true, data) end
+        return true, data
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 function FolioAPI:set_read_status(book_id, is_read, callback)
@@ -595,7 +799,7 @@ function FolioAPI:push_reading_sessions(sessions, callback)
     local code = response.code or response.status or 0
     local body = response.body or ""
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and data then
             if callback then callback(true, data) end
             return true, data
@@ -604,8 +808,8 @@ function FolioAPI:push_reading_sessions(sessions, callback)
         return true
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 function FolioAPI:get_book_statistics(book_id, callback)
@@ -627,15 +831,15 @@ function FolioAPI:get_book_statistics(book_id, callback)
     local code = response.code or response.status or 0
     local body = response.body or ""
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and data then
             if callback then callback(true, data) end
             return true, data
         end
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 function FolioAPI:list_annotations(book_id, since_or_cb, maybe_callback)
@@ -670,15 +874,15 @@ function FolioAPI:list_annotations(book_id, since_or_cb, maybe_callback)
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and type(data) == "table" then
             if callback then callback(true, data) end
             return true, data
         end
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 function FolioAPI:create_annotation(book_id, annotation, callback)
@@ -686,10 +890,12 @@ function FolioAPI:create_annotation(book_id, annotation, callback)
     local url = base_url .. "/books/" .. tostring(book_id) .. "/annotations?format=xpointer"
 
     local payload = json.encode({
+        -- Generated on the device: a request that is sent twice creates one annotation
+        id = utils.is_uuid(annotation.id) and annotation.id or nil,
         locationStart = annotation.locationStart or "",
         locationEnd = annotation.locationEnd or "",
         selectedText = annotation.selected_text or annotation.selectedText or "",
-        note = annotation.note,
+        note = (type(annotation.note) == "string" and annotation.note ~= "") and annotation.note or nil,
         color = annotation.color,
     })
 
@@ -709,15 +915,15 @@ function FolioAPI:create_annotation(book_id, annotation, callback)
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and data then
             if callback then callback(true, data) end
             return true, data
         end
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback)
@@ -729,7 +935,8 @@ function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback
         locationStart = annotation.locationStart or "",
         locationEnd = annotation.locationEnd or "",
         selectedText = annotation.selected_text or annotation.selectedText or "",
-        note = annotation.note,
+        -- An empty string clears the note on the server; a missing field leaves it alone
+        note = type(annotation.note) == "string" and annotation.note or "",
         color = annotation.color,
     })
 
@@ -747,12 +954,15 @@ function FolioAPI:update_annotation(book_id, annotation_id, annotation, callback
 
     local code = response.code or response.status or 0
     if code >= 200 and code < 300 then
-        if callback then callback(true) end
-        return true
+        -- The annotation as it is on the server now (nil when the response carried none)
+        local ok, data = decode_json(response.body or response.content or "")
+        if not ok or type(data) ~= "table" then data = nil end
+        if callback then callback(true, data) end
+        return true, data
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 function FolioAPI:delete_annotation(book_id, annotation_id, callback)
@@ -777,8 +987,8 @@ function FolioAPI:delete_annotation(book_id, annotation_id, callback)
         return true
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 function FolioAPI:list_bookmarks(book_id, since_or_cb, maybe_callback)
@@ -813,15 +1023,15 @@ function FolioAPI:list_bookmarks(book_id, since_or_cb, maybe_callback)
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and type(data) == "table" then
             if callback then callback(true, data) end
             return true, data
         end
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 function FolioAPI:create_bookmark(book_id, bookmark, callback)
@@ -829,6 +1039,8 @@ function FolioAPI:create_bookmark(book_id, bookmark, callback)
     local url = base_url .. "/books/" .. tostring(book_id) .. "/bookmarks?format=xpointer"
 
     local payload = json.encode({
+        -- Generated on the device: a request that is sent twice creates one bookmark
+        id = utils.is_uuid(bookmark.id) and bookmark.id or nil,
         location = bookmark.location or "",
         title = bookmark.title or "Bookmark",
     })
@@ -849,15 +1061,15 @@ function FolioAPI:create_bookmark(book_id, bookmark, callback)
     local body = response.body or response.content or ""
 
     if code >= 200 and code < 300 then
-        local ok, data = pcall(json.decode, body)
+        local ok, data = decode_json(body)
         if ok and data then
             if callback then callback(true, data) end
             return true, data
         end
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 function FolioAPI:delete_bookmark(book_id, bookmark_id, callback)
@@ -882,8 +1094,8 @@ function FolioAPI:delete_bookmark(book_id, bookmark_id, callback)
         return true
     end
 
-    if callback then callback(false, "HTTP " .. tostring(code)) end
-    return false
+    if callback then callback(false, "HTTP " .. tostring(code), code) end
+    return false, "HTTP " .. tostring(code), code
 end
 
 return FolioAPI

@@ -218,7 +218,10 @@ local tmp_counter = 0
 local function tmp_dir()
     local base = os.getenv("TMPDIR") or "/tmp"
     tmp_counter = tmp_counter + 1
-    local dir = string.format("%s/folio_chapters_spec_%d_%d", base, os.time(), tmp_counter)
+    -- (a name of its own even when the suite runs twice within a second)
+    local unique = os.tmpname()
+    os.remove(unique)
+    local dir = string.format("%s/folio_chapters_spec_%d_%d_%s", base, os.time(), tmp_counter, unique:match("[^/\\]+$") or "")
     require("lfs").mkdir(dir)
     return dir
 end
@@ -583,6 +586,110 @@ describe("Chapters book download", function()
         assert.is_false(exists(target))
     end)
 
+    it("waits for the user instead of throwing a long download away when the network goes", function()
+        local dir = tmp_dir()
+        local target = dir .. "/Book.epub"
+        local api = new_fake_api({
+            chapter("ch-a", 1, "First", "one"),
+            chapter("ch-b", 2, "Second", "![b](" .. PREFIX .. "b.png)"),
+        })
+        api.images["b.png"] = PNG
+        -- More failures than one round of attempts covers
+        api.failures["chapter:ch-b"] = {}
+        for _ = 1, 7 do table.insert(api.failures["chapter:ch-b"], { "timeout", nil }) end
+        api.failures["image:b.png"] = {}
+        for _ = 1, 5 do table.insert(api.failures["image:b.png"], { "closed", nil }) end
+
+        local asked = {}
+        local result, err = build(api, target, {
+            on_stalled = function(message)
+                asked[#asked + 1] = message
+                return true
+            end,
+        })
+        assert.is_nil(err)
+        assert.are.same({ "timeout", "closed" }, asked)
+        -- The chapter that was already downloaded was not asked for again
+        assert.is_equal(1, api:count("chapter:ch-a"))
+        assert.is_equal(2, result.chapters_fetched)
+        assert.is_equal(1, result.images_fetched)
+        ChaptersBook.discard(result)
+
+        -- The user gives up: the download fails as before
+        api.failures["chapter:ch-b"] = {}
+        for _ = 1, 5 do table.insert(api.failures["chapter:ch-b"], { "timeout", nil }) end
+        result, err = build(api, target, { on_stalled = function() return false end })
+        assert.is_nil(result)
+        assert.is_truthy(tostring(err):find("Failed to download chapter 2", 1, true))
+        assert.is_false(exists(target .. ".tmp"))
+
+        -- An answer of the server is not a lost connection: nobody is asked
+        asked = {}
+        api.failures["chapter:ch-b"] = { { "HTTP 403", 403 } }
+        result, err = build(api, target, { on_stalled = function(m) asked[#asked + 1] = m return true end })
+        assert.is_nil(result)
+        assert.is_equal(ChaptersBook.ERR_FORBIDDEN, err)
+        assert.are.same({}, asked)
+    end)
+
+    it("does not rebuild the whole file for an illustration the server does not have", function()
+        local dir = tmp_dir()
+        local target = dir .. "/Book.epub"
+        local api = new_fake_api({
+            chapter("ch-a", 1, "First", "![a](" .. PREFIX .. "gone.png) ![b](" .. PREFIX .. "ok.png)", "t1"),
+            chapter("ch-b", 2, "Second", "two", "t1"),
+        })
+        api.images["ok.png"] = PNG
+        local first = build(api, target)
+        assert.is_equal(1, first.images_missing)
+        assert.is_true(ChaptersBook.commit(first))
+
+        -- Nothing changed, the illustration is still not there: the file stays as it is
+        api.requests = {}
+        local again = build(api, target)
+        assert.is_true(again.unchanged)
+        assert.is_equal(1, again.images_missing)
+        assert.is_equal(1, api:count("image:gone.png"))
+        assert.is_equal(0, api:count("chapter:"))
+        assert.is_false(exists(target .. ".tmp"))
+
+        -- The server cannot be asked about it: not the time to decide
+        api.failures["image:gone.png"] = { { "timeout", nil }, { "timeout", nil }, { "timeout", nil } }
+        local failed, err = build(api, target)
+        assert.is_nil(failed)
+        assert.is_truthy(tostring(err):find("gone.png", 1, true))
+
+        -- The illustration turned up: now the file is rebuilt, and it is downloaded once
+        api.images["gone.png"] = PNG
+        api.requests = {}
+        local rebuilt = build(api, target)
+        assert.is_false(rebuilt.unchanged)
+        assert.is_equal(1, rebuilt.images_fetched)
+        assert.is_equal(0, rebuilt.images_missing)
+        assert.is_equal(1, api:count("image:gone.png"))
+        assert.is_equal(0, api:count("chapter:"))
+        ChaptersBook.discard(rebuilt)
+    end)
+
+    it("does not take a file for built when the archive could not be finished", function()
+        local dir = tmp_dir()
+        local target = dir .. "/Book.epub"
+        local api = new_fake_api({ chapter("ch-a", 1, "First", "one") })
+        local result, err = build(api, target, {
+            open_sink = function(path)
+                local sink = open_fake_sink(path)
+                local close = sink.close
+                -- The directory of the archive did not fit on the disk
+                sink.close = function() close() return false end
+                return sink
+            end,
+        })
+        assert.is_nil(result)
+        assert.is_equal("Failed to write EPUB", err)
+        assert.is_false(exists(target .. ".tmp"))
+        assert.is_false(exists(target))
+    end)
+
     it("never overwrites a file that belongs to another book", function()
         local dir = tmp_dir()
         local api = new_fake_api({ chapter("ch-a", 1, "First", "one") })
@@ -697,18 +804,6 @@ describe("Chapters book reading position", function()
         assert.is_equal("other", (ChaptersBook.incoming_location(layout, function() end, in_b)))
     end)
 
-    it("compares positions by chapter, not by percentage", function()
-        assert.is_true(ChaptersBook.remote_is_ahead(layout, "ch:ch-c", in_b))
-        assert.is_false(ChaptersBook.remote_is_ahead(layout, "ch:ch-b", in_b))
-        assert.is_false(ChaptersBook.remote_is_ahead(layout, "ch:ch-a", in_b))
-        -- Nothing to compare: the caller falls back to percentages. A chapter this copy
-        -- does not have may be new or deleted on the server.
-        assert.is_nil(ChaptersBook.remote_is_ahead(layout, "ch:ch-new", in_b))
-        assert.is_nil(ChaptersBook.remote_is_ahead(layout, "", in_b))
-        assert.is_nil(ChaptersBook.remote_is_ahead(layout, nil, in_b))
-        assert.is_nil(ChaptersBook.remote_is_ahead(layout, "ch:ch-c", "page_3"))
-    end)
-
     it("moves stored positions along with their chapters", function()
         local store = {
             last_xpointer = "/body/DocFragment[3]/body/section/p[2]/text().4",
@@ -780,9 +875,21 @@ describe("Manager with a Chapters book", function()
         return mgr
     end
 
-    local function doc_info(file, location, percent)
+    -- `progress`: what the plugin keeps about the position in the book's settings
+    -- ({ at = <time the reader last moved> }); nil for a book never read with the plugin
+    local function doc_info(file, location, percent, progress)
+        local data = { folio_progress = progress }
         return { file = file, file_path = file, title = "Novel", location = location, percent = percent or 40,
-            total_pages = 100, current_page = 40 }
+            total_pages = 100, current_page = 40,
+            docsettings = {
+                data = data,
+                readSetting = function(_, key) return data[key] end,
+                saveSetting = function(_, key, value) data[key] = value end,
+                flush = function() end,
+            } }
+    end
+    local function just_read()
+        return { at = os.time() }
     end
 
     it("pushes the chapter reference instead of the XPointer", function()
@@ -799,56 +906,119 @@ describe("Manager with a Chapters book", function()
         mgr.resolve_book_id = function(_, _ui, _doc, cb) cb(BOOK_ID) end
         mgr.get_doc_read_status = function() return false end
 
-        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[2]/body/section/p[3]/text().1") end
+        mgr.get_doc_info = function()
+            return doc_info(FILE, "/body/DocFragment[2]/body/section/p[3]/text().1", nil, just_read())
+        end
         mgr:sync_progress(nil, nil, true)
         assert.is_equal("ch:ch-b", pushed[1].location)
         assert.is_equal(40, pushed[1].percent)
 
         -- A regular book keeps sending its XPointer
-        mgr.get_doc_info = function() return doc_info("/books/Regular.epub", "/body/DocFragment[2]/body/p[3]") end
+        mgr.get_doc_info = function()
+            return doc_info("/books/Regular.epub", "/body/DocFragment[2]/body/p[3]", nil, just_read())
+        end
         mgr:sync_progress(nil, nil, true)
         assert.is_equal("/body/DocFragment[2]/body/p[3]", pushed[2].location)
 
         -- A position outside the known chapters: percentage only
-        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[9]/body/p") end
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[9]/body/p", nil, just_read()) end
         mgr:sync_progress(nil, nil, true)
         assert.is_nil(pushed[3].location)
         assert.is_equal(40, pushed[3].percent)
     end)
 
-    it("decides whether the server is ahead by chapter", function()
-        -- The web reader counts chapters (2 of 3 = 66.7%), KOReader counts pages
-        local remote = { location = "ch:ch-b", progressPercent = 66.7, isRead = false }
+    it("sends a position only when the reader moved, with the time it moved", function()
         local pushed = {}
         local api = {
             has_auth = function() return true end,
-            get_progress = function(_, _id, cb) cb(true, remote) end,
-            update_progress = function(_, _id, location, percent, _is_read, cb)
-                pushed[#pushed + 1] = { location = location, percent = percent }
-                if cb then cb(true) end
+            update_progress = function(_, _id, location, percent, _is_read, cb, opts)
+                pushed[#pushed + 1] = { location = location, percent = percent, updated_at = opts and opts.updated_at }
+                if cb then cb(true, { applied = true, updatedAt = "2026-11-12T10:00:00.000Z", isRead = false }) end
             end,
         }
         local mgr = new_manager(api)
         mgr.resolve_book_id = function(_, _ui, _doc, cb) cb(BOOK_ID) end
         mgr.get_doc_read_status = function() return false end
 
-        -- Reading on in the next chapter although the page percentage is still lower
-        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[3]/body/section/p[2]/text().0", 61) end
+        -- Opened and closed without a page turn: the position is not this device's to send
+        local info = doc_info(FILE, "/body/DocFragment[3]/body/section/p[2]/text().0", 61)
+        mgr.get_doc_info = function() return info end
+        mgr:sync_progress(nil, nil, true)
+        assert.is_equal(0, #pushed)
+
+        -- A page was turned
+        mgr:note_position_changed({ doc_settings = info.docsettings })
+        local moved_at = info.docsettings.data.folio_progress.at
         mgr:sync_progress(nil, nil, true)
         assert.is_equal(1, #pushed)
         assert.is_equal("ch:ch-c", pushed[1].location)
+        assert.is_equal(require("utils").iso8601_ms(moved_at), pushed[1].updated_at)
+        assert.is_equal("2026-11-12T10:00:00.000Z", info.docsettings.data.folio_progress.server)
 
-        -- The server is in a later chapter: it is not overwritten, whatever the percentages say
-        remote.location, remote.progressPercent = "ch:ch-c", 10
-        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[1]/body/section/p[2]/text().0", 30) end
+        -- The server has it: closing the book does not send it again
         mgr:sync_progress(nil, nil, true)
         assert.is_equal(1, #pushed)
 
-        -- A regular book keeps comparing percentages
-        remote.location, remote.progressPercent = "/body/DocFragment[9]/body/p", 80
-        mgr.get_doc_info = function() return doc_info("/books/Regular.epub", "/body/DocFragment[2]/body/p", 30) end
+        -- Another page
+        mgr:note_position_changed({ doc_settings = info.docsettings })
         mgr:sync_progress(nil, nil, true)
-        assert.is_equal(1, #pushed)
+        assert.is_equal(2, #pushed)
+    end)
+
+    it("leaves the local position unsynced when the server kept a newer one", function()
+        local api = {
+            has_auth = function() return true end,
+            update_progress = function(_, _id, _location, _percent, _is_read, cb)
+                cb(true, { applied = false, location = "ch:ch-c", progressPercent = 90, isRead = false,
+                    updatedAt = "2026-11-12T10:00:00.000Z" })
+            end,
+        }
+        local mgr = new_manager(api)
+        mgr.resolve_book_id = function(_, _ui, _doc, cb) cb(BOOK_ID) end
+        mgr.get_doc_read_status = function() return false end
+        local jumps = 0
+        mgr.goto_location = function() jumps = jumps + 1 end
+        local info = doc_info(FILE, "/body/DocFragment[1]/body/section/p[2]/text().0", 30, { at = 1000 })
+        mgr.get_doc_info = function() return info end
+
+        mgr:sync_progress(nil, nil, true)
+        -- Nothing is opened while pushing; the next pull follows the server
+        assert.is_equal(0, jumps)
+        assert.is_nil(info.docsettings.data.folio_progress.server)
+        assert.is_equal(1000, info.docsettings.data.folio_progress.at)
+    end)
+
+    it("asks a server that writes whatever it is sent before overwriting its position", function()
+        local remote = { location = "ch:ch-c", progressPercent = 90, isRead = false, updatedAt = "2026-11-12T10:00:00Z" }
+        local pushed = 0
+        local api = {
+            has_auth = function() return true end,
+            conditional_progress = function() return false end,
+            clock_offset = function() return 0 end,
+            get_progress = function(_, _id, cb) cb(true, remote) end,
+            update_progress = function(_, _id, _location, _percent, _is_read, cb)
+                pushed = pushed + 1
+                cb(true)
+            end,
+        }
+        local mgr = new_manager(api)
+        mgr.resolve_book_id = function(_, _ui, _doc, cb) cb(BOOK_ID) end
+        mgr.get_doc_read_status = function() return false end
+        local server_time = require("utils").parse_iso8601(remote.updatedAt)
+
+        -- Read here an hour before the server's position was written
+        mgr.get_doc_info = function()
+            return doc_info(FILE, "/body/DocFragment[1]/body/section/p[2]/text().0", 30, { at = server_time - 3600 })
+        end
+        mgr:sync_progress(nil, nil, true)
+        assert.is_equal(0, pushed)
+
+        -- Read here an hour after it
+        mgr.get_doc_info = function()
+            return doc_info(FILE, "/body/DocFragment[1]/body/section/p[2]/text().0", 30, { at = server_time + 3600 })
+        end
+        mgr:sync_progress(nil, nil, true)
+        assert.is_equal(1, pushed)
     end)
 
     it("opens the chapter the server position points to", function()
@@ -898,6 +1068,67 @@ describe("Manager with a Chapters book", function()
         mgr:pull_progress(nil, nil, false)
         assert.is_equal("/body/DocFragment[5]/body/p[1]", jumps[2].pos)
         assert.is_equal(90, jumps[2].percent)
+    end)
+
+    it("opens the server position only when it was changed after the local one", function()
+        local utils = require("utils")
+        local remote = { location = "/body/DocFragment[5]/body/p[1]", progressPercent = 90, isRead = false,
+            updatedAt = "2026-11-12T10:00:00.000Z" }
+        local server_time = utils.parse_iso8601(remote.updatedAt)
+        local pushed = {}
+        local api = {
+            has_auth = function() return true end,
+            clock_offset = function() return 0 end,
+            get_progress = function(_, _id, cb) cb(true, remote) end,
+            update_progress = function(_, _id, location, _percent, _is_read, cb, opts)
+                pushed[#pushed + 1] = { location = location, updated_at = opts and opts.updated_at }
+                cb(true, { applied = true, updatedAt = opts.updated_at, isRead = false })
+            end,
+        }
+        local mgr = new_manager(api)
+        mgr.resolve_book_id = function(_, _ui, _doc, cb) cb(BOOK_ID) end
+        mgr.get_doc_read_status = function() return false end
+        local jumps = {}
+        mgr.goto_location = function(_, _ui, pos) jumps[#jumps + 1] = pos end
+
+        -- The reader moved here after the server's position was written: it stays, and
+        -- the server is told
+        local info = doc_info("/books/Regular.epub", "/body/DocFragment[2]/body/p", 30, { at = server_time + 600 })
+        mgr.get_doc_info = function() return info end
+        mgr:pull_progress(nil, nil, false)
+        assert.is_equal(0, #jumps)
+        assert.is_equal(1, #pushed)
+        assert.is_equal("/body/DocFragment[2]/body/p", pushed[1].location)
+        assert.is_equal(utils.iso8601_ms(server_time + 600), pushed[1].updated_at)
+
+        -- The server's position is the later one
+        info = doc_info("/books/Regular.epub", "/body/DocFragment[2]/body/p", 30, { at = server_time - 600 })
+        mgr:pull_progress(nil, nil, false)
+        assert.are.same({ "/body/DocFragment[5]/body/p[1]" }, jumps)
+        assert.is_equal(1, #pushed)
+        assert.is_equal(remote.updatedAt, info.docsettings.data.folio_progress.server)
+        assert.is_equal(server_time, info.docsettings.data.folio_progress.at)
+
+        -- Nothing changed on either side since: nothing happens
+        mgr:pull_progress(nil, nil, false)
+        assert.is_equal(1, #jumps)
+        assert.is_equal(1, #pushed)
+
+        -- Another device moved on while this one stood still
+        remote.location, remote.updatedAt = "/body/DocFragment[7]/body/p[1]", "2026-11-12T11:00:00.000Z"
+        mgr:pull_progress(nil, nil, false)
+        assert.is_equal("/body/DocFragment[7]/body/p[1]", jumps[2])
+
+        -- The user asks for the server's position: it is opened whatever the times say
+        info = doc_info("/books/Regular.epub", "/body/DocFragment[2]/body/p", 30, { at = server_time + 86400 })
+        mgr:pull_progress(nil, nil, true)
+        assert.is_equal("/body/DocFragment[7]/body/p[1]", jumps[3])
+
+        -- "No position" (an empty location) is never opened
+        remote.location, remote.progressPercent, remote.updatedAt = "", 0, "2026-11-12T12:00:00.000Z"
+        info = doc_info("/books/Regular.epub", "/body/DocFragment[2]/body/p", 30)
+        mgr:pull_progress(nil, nil, false)
+        assert.is_equal(3, #jumps)
     end)
 
     it("links an assembled book to its server id without hashing the file", function()
@@ -1333,6 +1564,12 @@ describe("Manager with a copy of one volume", function()
     local last_layout = ChaptersBook.make_layout(BOOK_ID, { "c9", "c10" },
         { volume = 3, chapters_before = 8, book_chapters = 10 })
 
+    -- The book as the copies know it: volumes of 4, 4 and 2 chapters
+    local function list_volumes()
+        return true, { items = { { volume = 1, chaptersCount = 4 }, { volume = 2, chaptersCount = 4 },
+            { volume = 3, chaptersCount = 2 } }, chaptersTotal = 10 }
+    end
+
     local function new_manager(api)
         local mgr = Manager:new({ api = api, settings = {} })
         mgr._chapters_layouts = { [FILE] = layout, [LAST] = last_layout, ["/books/Regular.epub"] = false }
@@ -1344,12 +1581,22 @@ describe("Manager with a copy of one volume", function()
         if not api.push_reading_sessions then
             mgr.sync_reading_sessions = function() end
         end
+        api.list_volumes = api.list_volumes or list_volumes
         return mgr
     end
 
-    local function doc_info(file, location, percent)
+    -- `progress`: see the whole-book tests above; here the reader has just moved unless
+    -- `false` says the book was never read with the plugin
+    local function doc_info(file, location, percent, progress)
+        local data = { folio_progress = progress ~= false and (progress or { at = os.time() }) or nil }
         return { file = file, file_path = file, title = "Novel", location = location, percent = percent or 50,
-            total_pages = 100, current_page = 50 }
+            total_pages = 100, current_page = 50,
+            docsettings = {
+                data = data,
+                readSetting = function(_, key) return data[key] end,
+                saveSetting = function(_, key, value) data[key] = value end,
+                flush = function() end,
+            } }
     end
 
     local function progress_api(remote, pushed)
@@ -1396,45 +1643,88 @@ describe("Manager with a copy of one volume", function()
         assert.is_false(pushed[1].has_read)
         mgr:push_all_data(nil, nil, false)
         assert.is_false(pushed[2].has_read)
+        -- ...not even when the user asks for everything to be sent
+        mgr:push_all_data(nil, nil, true)
+        assert.is_false(pushed[3].has_read)
 
-        -- A book that is read on the server stays read
+        -- A book that is read on the server marks an unfinished volume as read, as it
+        -- does with a whole book
         remote.isRead = true
-        mgr:sync_progress(nil, nil, true)
-        assert.is_true(pushed[3].is_read)
-        assert.is_equal(0, #marked)
-        -- ...and marks an unfinished volume as read, as it does with a whole book
         mgr.get_doc_read_status = function() return false end
-        mgr:sync_progress(nil, nil, true)
+        mgr.goto_location = function() end
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[1]/body/p", 10, false) end
+        mgr:pull_progress(nil, nil, false)
         assert.are.same({ FILE, true }, marked[1])
-        assert.is_true(pushed[4].is_read)
+        assert.is_equal(3, #pushed)
 
         -- The last volume ends the book: finishing it finishes the book
         remote.isRead = false
         mgr.get_doc_read_status = function() return true end
         mgr.get_doc_info = function() return doc_info(LAST, "/body/DocFragment[2]/body/p", 100) end
         mgr:sync_progress(nil, nil, true)
-        assert.is_true(pushed[5].is_read)
-        assert.is_equal(100, pushed[5].percent)
-        assert.is_equal("ch:c10", pushed[5].location)
+        assert.is_true(pushed[4].is_read)
+        assert.is_equal(100, pushed[4].percent)
+        assert.is_equal("ch:c10", pushed[4].location)
     end)
 
-    it("leaves a position in a later volume alone and overtakes one in an earlier volume", function()
+    it("asks where the volume sits in the book before it speaks for the book", function()
         local pushed = {}
-        local remote = { location = "ch:c9", progressPercent = 85, isRead = false }
-        local mgr = new_manager(progress_api(remote, pushed))
-        mgr.get_doc_read_status = function() return false end
-        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[4]/body/p", 99) end
+        local api = progress_api(nil, pushed)
+        -- A fourth volume appeared after the copy of the third was downloaded
+        local asked = 0
+        api.list_volumes = function(_, _id, background)
+            asked = asked + 1
+            assert.is_true(background)
+            return true, { items = { { volume = 1, chaptersCount = 4 }, { volume = 2, chaptersCount = 4 },
+                { volume = 3, chaptersCount = 2 }, { volume = 4, chaptersCount = 2 } }, chaptersTotal = 12 }
+        end
+        local mgr = new_manager(api)
+        mgr.get_doc_read_status = function() return true end
+        local saved
+        local real_save = ChaptersBook.save_layout
+        ChaptersBook.save_layout = function(path, book_id, ids, scope)
+            saved = { path = path, scope = scope }
+            mgr._chapters_layouts[path] = ChaptersBook.make_layout(book_id, ids, scope)
+            return true
+        end
+        finally(function() ChaptersBook.save_layout = real_save end)
+        -- (the test keeps the layouts in the manager's cache: do not let it be dropped)
+        local layouts = mgr._chapters_layouts
+        mgr._chapters_layouts = setmetatable({}, {
+            __index = layouts,
+            __newindex = function(_, key, value) if value ~= nil then layouts[key] = value end end,
+        })
 
-        -- The server is in volume 3: 99% of volume 2 is 79.6% of the book
+        mgr.get_doc_info = function() return doc_info(LAST, "/body/DocFragment[2]/body/p", 100) end
         mgr:sync_progress(nil, nil, true)
-        assert.is_equal(0, #pushed)
+        assert.is_equal(1, asked)
+        assert.are.same({ volume = 3, chapters_before = 8, book_chapters = 12 }, saved.scope)
+        -- The end of volume 3 is 10 chapters of 12, and no longer the end of the book
+        assert.is_false(pushed[1].has_read)
+        assert.is_true(math.abs(pushed[1].percent - 1000 / 12) < 0.001)
 
-        -- The server is in volume 1 at 30% of the book
-        remote.location, remote.progressPercent = "ch:c2", 30
-        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[1]/body/p", 1) end
+        -- Not asked again on every page turn
         mgr:sync_progress(nil, nil, true)
-        assert.is_equal(1, #pushed)
-        assert.is_equal("ch:c5", pushed[1].location)
+        assert.is_equal(1, asked)
+    end)
+
+    it("does not speak for the book while the server cannot say where the volume sits", function()
+        local pushed = {}
+        local api = progress_api(nil, pushed)
+        api.list_volumes = function() return false, "timeout" end
+        local log = {}
+        api.list_annotations = function() log[#log + 1] = "list_annotations" end
+        local mgr = new_manager(api)
+        mgr.get_doc_read_status = function() return true end
+        mgr.get_doc_info = function() return doc_info(LAST, "/body/DocFragment[2]/body/p", 100) end
+
+        mgr:sync_progress(nil, nil, true)
+        assert.is_false(pushed[1].has_read)
+        -- Bookmarks and annotations would be shifted by a number that may be wrong
+        local result
+        mgr:sync_annotations(nil, nil, false, function(ok) result = ok end)
+        assert.is_false(result)
+        assert.are.same({}, log)
     end)
 
     it("opens a server position of this volume and stays quiet about other volumes", function()
@@ -1443,7 +1733,7 @@ describe("Manager with a copy of one volume", function()
         local jumps, notified = {}, 0
         mgr.goto_location = function(_, _ui, pos, percent) jumps[#jumps + 1] = { pos = pos, percent = percent } end
         mgr.notify_missing_chapter = function() notified = notified + 1 end
-        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[1]/body/p", 10) end
+        mgr.get_doc_info = function() return doc_info(FILE, "/body/DocFragment[1]/body/p", 10, false) end
 
         mgr:pull_progress(nil, nil, false)
         assert.are.same({ { pos = "/body/DocFragment[3]/body" } }, jumps)
@@ -1514,6 +1804,7 @@ describe("Manager with a copy of one volume", function()
     local function annotations_api(remote_annos, remote_bms, log)
         return {
             has_auth = function() return true end,
+            list_volumes = list_volumes,
             list_annotations = function(_, _id, _since, cb) cb(true, remote_annos) end,
             list_bookmarks = function(_, _id, _since, cb) cb(true, remote_bms) end,
             create_annotation = function(_, _id, payload, cb)
@@ -1573,7 +1864,7 @@ describe("Manager with a copy of one volume", function()
 
         local function find(pos0)
             for _, item in ipairs(docsettings.data.annotations) do
-                if item.pos0 == pos0 then return item end
+                if (item.pos0 or item.page) == pos0 then return item end
             end
         end
 

@@ -813,3 +813,39 @@ msgstr "на устройстве"
 #: browser.lua
 msgid "Download '%1'"
 msgstr "Загрузить «%1»"
+
+#: manager.lua
+msgid "Illustrations missing on the server: %1."
+msgstr "Иллюстраций нет на сервере: %1."
+
+#: manager.lua
+msgid ""
+"The connection to Folio was lost while downloading '%1'.\n"
+"%2\n"
+"\n"
+"Try again?"
+msgstr ""
+"Во время загрузки «%1» пропала связь с Folio.\n"
+"%2\n"
+"\n"
+"Повторить?"
+
+#: manager.lua
+msgid "Try again"
+msgstr "Повторить"
+
+#: manager.lua
+msgid "Fetching reading progress from Folio..."
+msgstr "Получение позиции чтения из Folio..."
+
+#: manager.lua
+msgid "Fetched progress: %1"
+msgstr "Получена позиция: %1"
+
+#: manager.lua
+msgid "All document data fetched from Folio!"
+msgstr "Все данные документа получены из Folio!"
+
+#: manager.lua
+msgid "Failed to fetch document data from Folio."
+msgstr "Не удалось получить данные документа из Folio."

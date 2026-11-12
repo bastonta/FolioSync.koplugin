@@ -561,7 +561,8 @@ function M.open_sink(path)
                 return writer:addFileFromMemory(name, content, mtime) and true or false
             end,
             close = function()
-                writer:close()
+                -- false only when the archive library says the file is not complete
+                return writer:close() ~= false
             end,
         }
     end
@@ -579,7 +580,7 @@ function M.open_sink(path)
                 return true
             end,
             close = function()
-                writer:close()
+                return writer:close() ~= false
             end,
         }
     end
@@ -730,7 +731,12 @@ function EpubWriter:finish(meta, chapters)
         return fail("Failed to write EPUB")
     end
 
-    self.sink:close()
+    -- The end of the archive (its directory) is written here: a failure leaves a file
+    -- that cannot be opened, and it must not take the place of the previous build
+    local ok_close, closed = pcall(self.sink.close, self.sink)
+    if not ok_close or closed == false then
+        return nil, "Failed to write EPUB"
+    end
     return manifest
 end
 
@@ -871,6 +877,13 @@ local function open_reader(path)
         }
     end)
     return ok and reader or nil
+end
+
+-- Whether this KOReader can read archives back (2025.04 and later): only then can a
+-- previous build be reused and a new one be checked.
+function M.can_read_archives()
+    local ok_arc, Archiver = pcall(require, "ffi/archiver")
+    return ok_arc and type(Archiver) == "table" and Archiver.Reader ~= nil
 end
 
 -- Reads an EPUB built by this module (or by FolioReader).
