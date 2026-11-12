@@ -1632,8 +1632,15 @@ function Manager:push_all_data(ui, document, force_manual)
             self:sync_reading_sessions(ui, document)
             if force_manual then
                 if push_prog_ok then
-                    utils.show_msg(T(_("All document data sent to Folio (%1%)!"),
-                        math.floor(self:outgoing_percent(info) or 0)))
+                    local book_pct = math.floor(self:outgoing_percent(info) or 0)
+                    local layout = self:get_chapters_layout(info.file or info.file_path)
+                    if ChaptersBook.is_volume_copy(layout) then
+                        -- The server counts in the whole book, the reader in this volume
+                        utils.show_msg(T(_("All document data sent to Folio (volume %1: %2%, book: %3%)!"),
+                            layout.volume, math.floor(tonumber(info.percent) or 0), book_pct))
+                    else
+                        utils.show_msg(T(_("All document data sent to Folio (%1%)!"), book_pct))
+                    end
                 else
                     utils.show_msg(_("Failed to push progress to Folio."))
                 end

@@ -394,6 +394,10 @@ msgstr "Отправка всех данных документа в Folio…"
 msgid "All document data sent to Folio (%1%)!"
 msgstr "Все данные документа отправлены в Folio (%1%)!"
 
+#: manager.lua:1104
+msgid "All document data sent to Folio (volume %1: %2%, book: %3%)!"
+msgstr "Все данные документа отправлены в Folio (том %1: %2%, книга: %3%)!"
+
 #: manager.lua:1106
 msgid "Failed to push progress to Folio."
 msgstr "Не удалось отправить прогресс в Folio."
