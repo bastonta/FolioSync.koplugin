@@ -31,6 +31,7 @@ FolioSync.koplugin/
 ├── spec/                     # Unit test suites executed with Busted
 │   └── unit/
 │       ├── folio_sync_spec.lua      # Extensive mocks & conversion/API/manager tests
+│       ├── sync_spec.lua            # Sync rules: book matching, position ordering, annotation merge, API client failures
 │       ├── chapters_spec.lua        # Chapters books: EPUB builder, download/update, position translation
 │       └── update_checker_spec.lua  # Release parser & version comparison tests
 ├── Makefile                  # Build tasks: compile gettext translations & generate release zips
@@ -53,11 +54,13 @@ FolioSync.koplugin/
 
 ### B. Reliable Book Matching & Snapshot State
 
-- **SHA-256 Primary Hash**: Books are identified on the server by the SHA-256 checksum of the e-book file (`/api/library/books/by-hash/{sha256}`).
-- **Title/Author Fallback**: If hash matching fails (e.g. file modified locally), fallback searching by title and primary author is used.
+- **SHA-256 Primary Hash**: Books are identified on the server by the SHA-256 checksum of the e-book file (`/api/library/books/by-hash/{sha256}`). The hash is cached per file (size + modification time) in `<settings>/folio_file_index.json`, which also records the book a file was downloaded as: such a file needs no lookup at all.
+- **Title/Author Fallback**: If hash matching fails (e.g. another edition), the title search result is accepted only when its title equals the local one (and the authors agree where both sides name one) and it is the only such book. A file the server does not know is not asked about again for 10 minutes, unless the user starts a sync.
 - **Snapshot State Tracking (`folio_sync_state.json`)**:
   - Stored inside the book's sidecar directory (`<book>.sdr/folio_sync_state.json`).
-  - Records the last synced hash and snapshot of annotations/bookmarks to prevent redundant network requests and safely detect local vs. remote deletions without data loss.
+  - A three-way merge (`Manager:sync_items`, one function for highlights and bookmarks): KOReader's list, the server's full list (never `?since=`: the device clock is not trusted) and the snapshot of what both held after the last sync. The snapshot records only what the server confirmed, keyed by server id, with the server's `updatedAt`; failed creates, updates and deletes are repeated on the next sync. New items get their id on the device (`POST` with `id` is idempotent on the server).
+  - KOReader's own items are never rewritten: a page bookmark has `page` and no `drawer` / `pos0` / `pos1` (KOReader tells bookmarks from highlights by `drawer`). While a book is open the reader's live list (`ui.annotation.annotations`) is used and changed in place; it is saved to the book's settings before the snapshot is.
+- **Reading position ordering**: the book's settings hold `folio_progress = { at, server, read }` — when the reader last moved (stamped on page turns), the `updatedAt` of the server row the local position equals, and the read flag as last exchanged. Pushes send `updatedAt` (device time + the server/device clock offset learned from the `Date` header) and the server keeps a newer row (`applied = false`); pulls open the server position only when it is the newer one. Manual push / fetch force their direction.
 
 ### C. Books Without a File (`Chapters` Kind)
 
@@ -70,7 +73,8 @@ FolioSync.koplugin/
 
 ### D. E-Ink Device Constraints & Defensive Programming
 
-- **Never Block the Main UI Thread**: Long-running or network-bound tasks must yield or use non-blocking feedback (`InfoMessage` or `ConfirmBox`).
+- **Never Block the Main UI Thread**: Long-running or network-bound tasks must yield or use non-blocking feedback (`InfoMessage` or `ConfirmBox`). HTTP is synchronous, so background sync runs only through `FolioSync:background_sync_allowed()` (auto sync on, network connected, not in the back-off that `FolioAPI` enters after a network failure); actions the user starts call `Manager:user_requested()` first.
+- **JSON `null`**: KOReader's `json` (LuaJSON) decodes `null` to a function. `FolioAPI` strips such values from every response; code that copies server fields into KOReader's settings must still take strings only.
 - **Pcall Wrapping**: Wrap all network calls, JSON decoding, and filesystem writes with `pcall` to ensure an API error or network drop never crashes KOReader.
 - **Resource Conservation**: Avoid large temporary table allocations during page turns. Reading progress is throttled to avoid flooding the server on fast scanning.
 

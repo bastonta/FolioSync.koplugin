@@ -10,7 +10,7 @@
   - **Hierarchical Series Navigation**: Browse standalone books and series folders with intuitive breadcrumb navigation.
   - **Advanced Search**: Search across your library with scoped targets (**All fields**, **Book Titles**, **Authors**, or **Series Names**).
   - **Sorting**: Sort library items by **Name**, **Recently Added**, or **Series Order** (`sortOrder`).
-  - **Automatic Series Folders**: Automatically organize downloaded books into nested series directories (`<download_dir>/<Series>/<Subseries>/<Title> - <Author>.epub`).
+  - **Automatic Series Folders**: Automatically organize downloaded books into nested series directories (`<download_dir>/<Series>/<Subseries>/<Title> - <Author>.epub`). Two books that share title and author do not share a file: the second one gets the start of its id into the name (`… (0198c0de).epub`).
   - **Flexible Download Paths**: Download directly to your configured default folder or pick a custom folder per book.
   - **Instant Reading & Refresh**: Prompt to open downloaded books immediately upon completion, with automatic File Manager refresh.
   - **Read / Unread Management**: Mark books as read or unread directly from the browser (with `✅` and `📖` status indicators).
@@ -18,14 +18,16 @@
 
 - **🔄 Reading Progress & Status Sync**
   - **Automatic Progress Sync**: Automatically syncs reading position and progress percentage in the background on page turns (throttled) and on document close.
+  - **The Latest Change Wins**: Every position carries the time it was read at. Opening a book jumps to the server position only when it was read later than the one on the device; a device that was offline for a week does not overwrite what was read elsewhere since, and going back in a book to read it again is a position like any other. The device clock does not have to be right: it is compared with the server's on every answer. (Needs a Folio server that orders progress by time; an older one is asked for its position before anything is sent.)
+  - **Quiet Without a Network**: Background sync is skipped while Wi-Fi is off, and after the server failed to answer it pauses (30 seconds, growing to 10 minutes) instead of blocking every page turn.
   - **On-Demand Sync**: Push or pull reading position on demand via the document menu or dispatcher gestures.
   - **Read Status Synchronization**: Synchronize finished / read status between your device and Folio server.
   - **Precise Location Mapping**: Accurate conversion between KOReader locations (XPointers, EpubCFI, page numbers) and server formats.
 
 - **🖊️ Highlights & Annotation Sync**
   - **Bidirectional Merge**: Syncs text highlights, notes, and color metadata bidirectionally between KOReader and Folio.
-  - **Snapshot State Tracking**: Tracks sync state snapshot in `<book>.sdr/folio_sync_state.json` to reliably handle remote and local deletions without data loss.
-  - **Robust Book Matching**: Identifies books primarily via SHA-256 file hash matching with metadata fallback (title/author).
+  - **Snapshot State Tracking**: Tracks sync state snapshot in `<book>.sdr/folio_sync_state.json` to reliably handle remote and local deletions without data loss. The snapshot only records what the server confirmed: a highlight that could not be sent, or a deletion that failed, is tried again on the next sync. Edits and deletions made in the web reader or in another app reach the device.
+  - **Robust Book Matching**: Identifies books primarily via SHA-256 file hash matching (computed once per file). A file downloaded through the plugin is known as the book it was downloaded as. The title fallback only accepts a book with the same title (and author, when both are known) that is the only such book on the server.
 
 - **🔖 Bookmark Synchronization**
   - Keeps document bookmarks in sync between KOReader and Folio.
@@ -110,8 +112,8 @@
 
 While reading an open document, access **Folio Sync & Library** from the document menu:
 
-- **📤 Push All Data of Active Document**: Upload local progress, highlights, and bookmarks to Folio.
-- **📥 Fetch All Data of Active Document**: Download server progress, highlights, and bookmarks from Folio.
+- **📤 Push All Data of Active Document**: Upload local progress, highlights, and bookmarks to Folio. The position on this device replaces the one on the server, whichever is newer.
+- **📥 Fetch All Data of Active Document**: Download server progress, highlights, and bookmarks from Folio. The position on the server is opened, whichever is newer.
 - **🔄 Sync Active Document Annotations**: Perform a bidirectional merge of annotations and bookmarks.
 - **✓ Toggle Read Status on Folio**: Toggle read/unread status on Folio and update local reading status.
 

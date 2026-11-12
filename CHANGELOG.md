@@ -24,9 +24,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires a Folio server that lets API keys read chapters (`GET /books/{id}/chapters`); older servers answer `403` and the plugin says so.
 - Downloading by volume needs a Folio server with `GET /books/{id}/volumes`; with an older server only the whole book is offered.
 
+- **Reading position: the latest change wins.** The position is sent with the time it was read at and the server keeps a newer one; opening a book jumps to the server position only when it is the newer one. A device that comes online with an old position no longer overwrites what was read elsewhere, and going back in a book is synced like any other position (it used to be refused as "behind", while every opening threw the reader forward again). Device and server clocks are reconciled through the `Date` header of the server's answers. **Push All** / **Fetch All** force their direction. Needs a Folio server that orders progress by `updatedAt`; an older server is asked for its position before anything is sent.
+- The read flag follows the same rule in both directions: a book marked unread elsewhere becomes unread on the device.
+- Bookmarks and highlights are merged against a snapshot that only records what the server confirmed; the whole list is requested on every sync instead of "changes since" a time taken from the device clock. Highlights and bookmarks get their id on the device, so a request that is repeated creates nothing twice.
+- Background sync is skipped while the network is off and pauses after the server failed to answer (30 s, growing to 10 min); request timeouts are 5 s / 15 s instead of 10 s / 30 s. Actions started by the user are always attempted.
+- The title fallback for matching a local file accepts a search result only when title (and author, where known) are the same and it is the only such book. Books linked to a wrong server book by an earlier version stay linked: remove `folio_book_id` from the book's settings (or delete the `.sdr` folder) to match them again.
+- Downloaded book files are written to `<name>.part` and put in place when complete. A second book with the same title and author is saved as `<Title> - <Author> (<id>).epub` instead of replacing the first.
+- A long chapter download that loses its connection asks whether to try again and continues where it was, instead of starting over.
+
 ### Fixed
 - `list_books` now paginates with `offset`/`limit` as the server expects instead of an ignored `page` parameter.
 - Downloading a book file over a copy assembled from chapters relinks the file to the downloaded book.
+- Page bookmarks were turned into highlights by the first sync (a `drawer` and a `color` were written into KOReader's own items): the bookmark corner disappeared and tapping it again added a duplicate. KOReader's items are no longer modified, and bookmarks damaged by earlier versions are repaired on the next sync.
+- Progress in the first percent of a book was multiplied by 100 twice (page 4 of 600 was sent as 66.7%).
+- Session and item ids are taken from the system's random source: the fallback generator repeated the same ids after every start of KOReader, and the server dropped those reading sessions as duplicates.
+- A highlight or bookmark the server did not get was recorded as synced and never sent again; a deletion that failed was never repeated.
+- Deletions and edits made in the web reader or another app never reached the device once a book had been synced.
+- Two highlights of the same words were treated as one: the second was not sent and its colour and note overwrote the first.
+- Highlights made in the first session with a book could disappear when anything was pulled from the server (the saved list was read instead of the reader's own, which was then replaced).
+- A JSON `null` from the server (`color`, `note`, `title`) could end up in the book's settings as a value KOReader cannot save.
+- Every event was handled twice (the plugin added itself to the reader's event chain, where KOReader had already put it).
+- A book the server does not know was read and hashed in full on every sync — every 5 seconds while turning pages. The hash is cached, and such a book is left alone for 10 minutes.
+- Resetting the sync snapshot also deleted reading sessions recorded offline.
+- A reading session started when the device went to sleep, so reading in the morning was counted for the evening before; a session now starts on wake-up and ends with the last page turn.
+- A failed or incomplete download (full disk, lost connection) could replace a good copy of a book and report success.
+- A volume copy keeps its place in the book up to date (`GET /books/{id}/volumes`): the last volume downloaded no longer calls the book finished after another volume was added, and bookmarks and annotations are not shifted by a stale chapter count.
+- An illustration the server does not have no longer turns every update of a `Chapters` book into a rebuild of the whole file; the number of missing illustrations is shown.
+- A series named `..` could place a downloaded file outside the download folder.
+- **✓ Mark as Read** in the library browser created empty `.sdr` folders for books that were not downloaded.
+- An EPUB whose archive could not be finished (full disk) is not put in place of the previous build.
+- XPointers that name a text node by number (`text()[2].15`) fall back to their paragraph when opening a server position.
+- The update check ordered `beta.10` before `beta.2`.
 
 ## [0.4.0] - 2026-08-30
 
